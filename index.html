@@ -174,12 +174,13 @@
 <div id="app" style="display:none;">
   <nav class="sidebar">
     <div class="brand">
-      <span class="tag">SUPERMERCADO</span>
-      <h1>La Gran Cosecha</h1>
+      <div style="background:var(--blanco); border-radius:10px; padding:8px; margin-bottom:10px;">
+        <img src="logo-gran-cosecha.jpg" alt="La Gran Cosecha" style="width:100%; display:block; border-radius:6px;">
+      </div>
       <div class="sub">gestión &amp; caja</div>
     </div>
     <ul class="navlist" id="navlist"></ul>
-    <div class="sidebar-foot" id="sidebar-slogan">Sembrando esperanza y confianza.<br>Cosechando calidad y bienestar.</div>
+    <div class="sidebar-foot" id="sidebar-slogan">Sembrando confianza y cosechando bienestar.</div>
   </nav>
   <main id="main"></main>
 </div>
@@ -190,7 +191,7 @@
 /* ======================= CONFIG ======================= */
 const CONFIG = {
   // Pega aquí la URL de tu implementación de Apps Script (Ver instrucciones en SETUP.md)
-  API_URL: 'https://script.google.com/macros/s/AKfycbypg2kPPMQV1DSI0x2_bOolN123YVGHxdueuxTFaRA4Xk1MdTJYBj5JFm7kwqbyRS7AXg/exec'
+  API_URL: 'https://script.google.com/macros/s/AKfycbxbMN6bVd4tfBTDWPw5fwFMbSfjsTZDyEOH4pohY-9b77PKMHims8oIIsLn1E0eiUnalA/exec'
 };
 
 const UNIDADES = ['Libra','Kilogramo','Caja','Bulto','Docena','Canastilla','Unidad'];
@@ -550,8 +551,8 @@ function renderVentas(main){
     <div class="grid" id="ven-cerrado-fields" style="display:none; margin-top:10px;">
       <div class="field"><label>Valor total acordado</label><input type="number" id="ven-totalcerrado" placeholder="0"></div>
     </div>
-    <div class="field" id="ven-cliente-field" style="display:none; margin-top:10px;">
-      <label>Cliente</label>
+    <div class="field" id="ven-cliente-field" style="margin-top:10px;">
+      <label>Cliente (obligatorio si es fiado; opcional en venta de contado)</label>
       <select id="ven-cliente"><option value="">Selecciona cliente…</option>${STATE.clientes.map(c=>`<option value="${c.ID}">${c.Nombre}</option>`).join('')}</select>
     </div>
     <div class="hint" id="ven-preview">Valor total: $ 0</div>
@@ -560,8 +561,11 @@ function renderVentas(main){
   main.appendChild(card);
 
   main.appendChild(el(`<div class="card"><h3>Ventas registradas</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">V. unit. real</th><th class="num">V. total</th><th>Pago</th></tr></thead>
-    <tbody>${STATE.ventas.slice().reverse().map(v=>`<tr><td>${v.Fecha}</td><td>${v.Articulo}</td><td class="num">${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorUnitarioReal)}${v.EsPrecioCerrado?' <span class="mono" style="color:var(--tomate);font-size:11px;">(remate)</span>':''}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td></tr>`).join('') || '<tr class="empty-row"><td colspan="7">Sin ventas aún.</td></tr>'}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">V. unit. real</th><th class="num">V. total</th><th>Pago</th><th>Cliente</th></tr></thead>
+    <tbody>${STATE.ventas.slice().reverse().map(v=>{
+      const cli = STATE.clientes.find(c=>c.ID===v.IDCliente);
+      return `<tr><td>${v.Fecha}</td><td>${v.Articulo}</td><td class="num">${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorUnitarioReal)}${v.EsPrecioCerrado?' <span class="mono" style="color:var(--tomate);font-size:11px;">(remate)</span>':''}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td><td>${cli?cli.Nombre:'—'}</td></tr>`;
+    }).join('') || '<tr class="empty-row"><td colspan="8">Sin ventas aún.</td></tr>'}</tbody></table></div>
   </div>`));
 
   const cerradoCheckbox = document.getElementById('ven-cerrado');
@@ -600,9 +604,7 @@ function renderVentas(main){
     valorUnitInput.disabled = cerradoCheckbox.checked;
     updatePreview();
   };
-  tipoPagoSel.onchange = () => {
-    clienteField.style.display = tipoPagoSel.value === 'Fiado' ? 'block' : 'none';
-  };
+  tipoPagoSel.onchange = () => {};
 
   function updatePreview(){
     const cant = Number(document.getElementById('ven-cantidad').value)||0;
@@ -722,11 +724,24 @@ function renderClienteDetalle(main, id){
   main.appendChild(el(`<div class="back-link" onclick="goTo('clientes')">← Volver a clientes</div>`));
   main.appendChild(el(pageHead('Cliente', cli.Nombre, `${cli.Telefono||'Sin teléfono'} · ${cli.Direccion||'Sin dirección'}`)));
 
+  const todasCompras = STATE.ventas.filter(v => v.IDCliente === id).slice().reverse();
+  const totalGeneral = todasCompras.reduce((s,v)=> s + Number(v.ValorTotal||0), 0);
+
+  main.appendChild(el(`<div class="kpi-row">
+    <div class="kpi"><div class="label">Total histórico comprado</div><div class="value">${fmtMoney(totalGeneral)}</div></div>
+    <div class="kpi"><div class="label">Compras registradas</div><div class="value">${todasCompras.length}</div></div>
+  </div>`));
+
+  main.appendChild(el(`<div class="card"><h3>Historial de compras (contado y fiado)</h3>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">Valor</th><th>Pago</th></tr></thead>
+    <tbody>${todasCompras.map(v=>`<tr><td>${v.Fecha}</td><td>${v.Articulo}</td><td class="num">${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Este cliente aún no tiene compras registradas.</td></tr>'}</tbody></table></div>
+  </div>`));
+
   const compras = STATE.fiado.filter(f => f.IDCliente === id).slice().reverse();
   const saldoTotal = compras.reduce((s,f)=> s + Number(f.Saldo||0), 0);
 
   main.appendChild(el(`<div class="kpi-row">
-    <div class="kpi"><div class="label">Deuda actual</div><div class="value">${fmtMoney(saldoTotal)}</div></div>
+    <div class="kpi tomate"><div class="label">Deuda actual (fiado)</div><div class="value">${fmtMoney(saldoTotal)}</div></div>
     <div class="kpi"><div class="label">Compras fiadas</div><div class="value">${compras.length}</div></div>
   </div>`));
 
@@ -819,24 +834,65 @@ function renderHistVentaReal(main){
 
 /* ======================= HISTORIAL: VENTA POR CLIENTE ======================= */
 function renderHistVentaCliente(main){
-  main.appendChild(el(pageHead('Historial 3','Venta por cliente','Balance mensual de dinero comprado por cada cliente (fiado).')));
+  main.appendChild(el(pageHead('Historial 3','Venta por cliente','Revisa qué compró cada cliente. Activa las casillas según qué tanto detalle quieras ver.')));
 
-  const porCliente = {};
-  STATE.fiado.forEach(f => {
-    const cli = STATE.clientes.find(c => c.ID === f.IDCliente);
-    const nombre = cli ? cli.Nombre : 'Desconocido';
-    const key = nombre + '|' + monthKey(f.Fecha);
-    if(!porCliente[key]) porCliente[key] = {cliente:nombre, mes:monthKey(f.Fecha), total:0, abonado:0, saldo:0};
-    porCliente[key].total += Number(f.ValorTotal);
-    porCliente[key].abonado += Number(f.Abonado);
-    porCliente[key].saldo += Number(f.Saldo);
-  });
-  const rows = Object.values(porCliente).sort((a,b)=> b.mes.localeCompare(a.mes) || a.cliente.localeCompare(b.cliente));
+  const optsCard = el(`<div class="card"><h3>Opciones de visualización</h3>
+    <div class="checkbox-row"><input type="checkbox" id="hist-ver-articulos" checked><label for="hist-ver-articulos">Ver artículos y cantidad comprada</label></div>
+    <div class="checkbox-row"><input type="checkbox" id="hist-ver-total" checked><label for="hist-ver-total">Ver solo nombre y total en dinero</label></div>
+  </div>`);
+  main.appendChild(optsCard);
 
-  main.appendChild(el(`<div class="card"><h3>Resumen mensual por cliente</h3>
-    <div class="table-wrap"><table><thead><tr><th>Mes</th><th>Cliente</th><th class="num">Total comprado</th><th class="num">Abonado</th><th class="num">Saldo</th></tr></thead>
-    <tbody>${rows.map(r=>`<tr><td class="mono">${r.mes}</td><td>${r.cliente}</td><td class="num">${fmtMoney(r.total)}</td><td class="num">${fmtMoney(r.abonado)}</td><td class="num">${fmtMoney(r.saldo)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="5">Sin datos aún.</td></tr>'}</tbody></table></div>
-  </div>`));
+  const tablesContainer = el('<div id="hist-cliente-tables"></div>');
+  main.appendChild(tablesContainer);
+
+  function renderTables(){
+    const verArticulos = document.getElementById('hist-ver-articulos').checked;
+    const verTotal = document.getElementById('hist-ver-total').checked;
+    tablesContainer.innerHTML = '';
+    const ventasConCliente = STATE.ventas.filter(v => v.IDCliente);
+
+    if(verTotal){
+      const porCliente = {};
+      ventasConCliente.forEach(v => {
+        const cli = STATE.clientes.find(c => c.ID === v.IDCliente);
+        const nombre = cli ? cli.Nombre : 'Desconocido';
+        const key = nombre + '|' + monthKey(v.Fecha);
+        if(!porCliente[key]) porCliente[key] = {cliente:nombre, mes:monthKey(v.Fecha), total:0, compras:0};
+        porCliente[key].total += Number(v.ValorTotal);
+        porCliente[key].compras += 1;
+      });
+      const rows = Object.values(porCliente).sort((a,b)=> b.mes.localeCompare(a.mes) || a.cliente.localeCompare(b.cliente));
+      tablesContainer.appendChild(el(`<div class="card"><h3>Nombre y total en dinero</h3>
+        <div class="table-wrap"><table><thead><tr><th>Mes</th><th>Cliente</th><th class="num">N.° de compras</th><th class="num">Total comprado</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr><td class="mono">${r.mes}</td><td>${r.cliente}</td><td class="num">${r.compras}</td><td class="num">${fmtMoney(r.total)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="4">Sin datos aún.</td></tr>'}</tbody></table></div>
+      </div>`));
+    }
+
+    if(verArticulos){
+      const porClienteArt = {};
+      ventasConCliente.forEach(v => {
+        const cli = STATE.clientes.find(c => c.ID === v.IDCliente);
+        const nombre = cli ? cli.Nombre : 'Desconocido';
+        const key = nombre + '|' + monthKey(v.Fecha) + '|' + v.Articulo;
+        if(!porClienteArt[key]) porClienteArt[key] = {cliente:nombre, mes:monthKey(v.Fecha), articulo:v.Articulo, cantidad:0, unidad:v.Unidad, total:0};
+        porClienteArt[key].cantidad += Number(v.Cantidad);
+        porClienteArt[key].total += Number(v.ValorTotal);
+      });
+      const rows2 = Object.values(porClienteArt).sort((a,b)=> b.mes.localeCompare(a.mes) || a.cliente.localeCompare(b.cliente) || a.articulo.localeCompare(b.articulo));
+      tablesContainer.appendChild(el(`<div class="card"><h3>Artículos y cantidad comprada</h3>
+        <div class="table-wrap"><table><thead><tr><th>Mes</th><th>Cliente</th><th>Artículo</th><th class="num">Cantidad</th><th>Unidad</th><th class="num">Valor</th></tr></thead>
+        <tbody>${rows2.map(r=>`<tr><td class="mono">${r.mes}</td><td>${r.cliente}</td><td>${r.articulo}</td><td class="num">${fmtNum(r.cantidad)}</td><td>${r.unidad}</td><td class="num">${fmtMoney(r.total)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Sin datos aún.</td></tr>'}</tbody></table></div>
+      </div>`));
+    }
+
+    if(!verTotal && !verArticulos){
+      tablesContainer.appendChild(el('<div class="hint">Activa al menos una casilla para ver el historial.</div>'));
+    }
+  }
+
+  document.getElementById('hist-ver-articulos').onchange = renderTables;
+  document.getElementById('hist-ver-total').onchange = renderTables;
+  renderTables();
 }
 
 /* ======================= FLUJO DE CAJA ======================= */
