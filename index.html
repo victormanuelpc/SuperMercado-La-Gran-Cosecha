@@ -2,6 +2,9 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>La Gran Cosecha · Gestión</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -191,7 +194,7 @@
 /* ======================= CONFIG ======================= */
 const CONFIG = {
   // Pega aquí la URL de tu implementación de Apps Script (Ver instrucciones en SETUP.md)
-  API_URL: 'https://script.google.com/macros/s/AKfycbypg2kPPMQV1DSI0x2_bOolN123YVGHxdueuxTFaRA4Xk1MdTJYBj5JFm7kwqbyRS7AXg/exec'
+  API_URL: 'https://script.google.com/macros/s/AKfycbyDYOb0F_4Rzhctyo6Np3e-mRgzVtXSg8AR6493z__wKmav-mtf2SiSfW4yyD8FmF1c-A/exec'
 };
 
 const UNIDADES = ['Libra','Kilogramo','Caja','Bulto','Docena','Canastilla','Unidad'];
@@ -246,7 +249,6 @@ const SECTIONS = [
   {id:'dashboard', label:'Resumen'},
   {id:'capital', label:'Capital social'},
   {id:'compras', label:'Compras'},
-  {id:'calidad', label:'Control de calidad'},
   {id:'clientes', label:'Clientes'},
   {id:'ventas', label:'Ventas'},
   {id:'historial-compras', label:'Historial · compras'},
@@ -325,7 +327,6 @@ function renderSection(){
     case 'dashboard': return renderDashboard(main);
     case 'capital': return renderCapital(main);
     case 'compras': return renderCompras(main);
-    case 'calidad': return renderCalidad(main);
     case 'ventas': return renderVentas(main);
     case 'clientes': return renderClientes(main);
     case 'historial-compras': return renderHistCompras(main);
@@ -362,6 +363,30 @@ function renderDashboard(main){
       <div class="kpi"><div class="label">Caja (ingresos - egresos op.)</div><div class="value">${fmtMoney(totalCaja)}</div></div>
     </div>
   `));
+
+  const balanceCard = el(`<div class="card"><h3>Balance / utilidad del día</h3>
+    <div class="grid" style="margin-bottom:14px;"><div class="field"><label>Fecha</label><input type="date" id="bal-fecha" value="${todayStr()}"></div></div>
+    <div id="bal-contenido"></div>
+  </div>`);
+  main.appendChild(balanceCard);
+
+  function renderBalanceDia(){
+    const fecha = document.getElementById('bal-fecha').value;
+    const compras = STATE.compras.filter(c=>c.Fecha===fecha).reduce((s,c)=> s + Number(c.ValorTotal||0), 0);
+    const prodServ = STATE.caja.filter(c=>c.Fecha===fecha).reduce((s,c)=> s + Number(c.Egreso||0), 0);
+    const ventas = STATE.ventas.filter(v=>v.Fecha===fecha).reduce((s,v)=> s + Number(v.ValorTotal||0), 0);
+    const utilidad = ventas - compras - prodServ;
+    document.getElementById('bal-contenido').innerHTML = `
+      <div class="kpi-row">
+        <div class="kpi"><div class="label">Vendido</div><div class="value">${fmtMoney(ventas)}</div></div>
+        <div class="kpi"><div class="label">Comprado</div><div class="value">${fmtMoney(compras)}</div></div>
+        <div class="kpi"><div class="label">Productos y servicios</div><div class="value">${fmtMoney(prodServ)}</div></div>
+        <div class="kpi ${utilidad<0?'tomate':''}"><div class="label">Utilidad del día</div><div class="value">${fmtMoney(utilidad)}</div></div>
+      </div>
+      <div class="hint">Utilidad = total vendido − total comprado − productos y servicios, para la fecha seleccionada.</div>`;
+  }
+  document.getElementById('bal-fecha').onchange = renderBalanceDia;
+  renderBalanceDia();
 
   main.appendChild(el(`<div class="card"><h3>Últimas compras</h3>
     <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th>Cant.</th><th>Unidad</th><th class="num">Valor total</th></tr></thead>
@@ -413,33 +438,57 @@ function renderCapital(main){
 
 /* ======================= COMPRAS ======================= */
 function renderCompras(main){
-  main.appendChild(el(pageHead('Abastos','Compras','Registra cada compra realizada en la central de abastos.')));
+  main.appendChild(el(pageHead('Abastos','Compras','Registra cada compra. Si al revisar en casa descartas mercancía dañada, anota la cantidad real para calcular el costo real de lo que sale a la venta.')));
 
   const card = el(`<div class="card"><h3>Nueva compra</h3>
     <div class="grid">
       <div class="field"><label>Fecha</label><input type="date" id="com-fecha" value="${todayStr()}"></div>
       <div class="field"><label>Artículo</label>${selectArticuloHTML('com-articulo')}</div>
       <div class="field"><label>Unidad de medida</label><select id="com-unidad">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
-      <div class="field"><label>Cantidad</label><input type="number" id="com-cantidad" placeholder="0"></div>
+      <div class="field"><label>Cantidad comprada</label><input type="number" id="com-cantidad" placeholder="0"></div>
       <div class="field"><label>Valor unitario</label><input type="number" id="com-valorunit" placeholder="0"></div>
+      <div class="field"><label>Descuento</label><input type="number" id="com-descuento" placeholder="0"></div>
+      <div class="field"><label>Cantidad real (tras descartar lo dañado)</label><input type="number" id="com-cantreal" placeholder="Igual a la comprada si no descartaste nada"></div>
     </div>
     <div class="hint" id="com-total-preview">Valor total: $ 0</div>
     <div class="row-actions"><button class="btn" id="com-guardar">Guardar compra</button></div>
   </div>`);
   main.appendChild(card);
 
+  const productosServCard = el(`<div class="card"><h3>Productos y servicios del día</h3>
+    <div class="hint" style="margin-bottom:10px;">Bolsas, transporte, auxiliar de ventas u otros gastos del día. Esto se guarda en el flujo de caja operacional.</div>
+    <div class="grid">
+      <div class="field"><label>Fecha</label><input type="date" id="ps-fecha" value="${todayStr()}"></div>
+      <div class="field"><label>Categoría</label><select id="ps-categoria"><option>Bolsas</option><option>Transporte</option><option>Auxiliar de ventas</option><option>Otro</option></select></div>
+      <div class="field"><label>Concepto</label><input type="text" id="ps-concepto" placeholder="Detalle (opcional)"></div>
+      <div class="field"><label>Valor</label><input type="number" id="ps-valor" placeholder="0"></div>
+    </div>
+    <div class="row-actions"><button class="btn secondary" id="ps-guardar">Guardar gasto del día</button></div>
+  </div>`);
+  main.appendChild(productosServCard);
+
+  const resumenCard = el(`<div class="card"><h3>Resumen del día</h3>
+    <div class="grid" style="margin-bottom:14px;">
+      <div class="field"><label>Ver resumen de la fecha</label><input type="date" id="res-fecha" value="${todayStr()}"></div>
+    </div>
+    <div id="res-contenido"></div>
+  </div>`);
+  main.appendChild(resumenCard);
+
   main.appendChild(el(`<div class="card"><h3>Compras registradas</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th>Cant.</th><th>Unidad</th><th class="num">V. unitario</th><th class="num">V. total</th></tr></thead>
-    <tbody>${STATE.compras.slice().reverse().map(c=>`<tr><td>${c.Fecha}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitario)}</td><td class="num">${fmtMoney(c.ValorTotal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Sin compras aún.</td></tr>'}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">V. unitario</th><th class="num">Descuento</th><th class="num">V. total</th><th class="num">Cant. real</th><th class="num">Costo real unit.</th></tr></thead>
+    <tbody>${STATE.compras.slice().reverse().map(c=>`<tr><td>${c.Fecha}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitario)}</td><td class="num">${fmtMoney(c.Descuento)}</td><td class="num">${fmtMoney(c.ValorTotal)}</td><td class="num">${fmtNum(c.CantidadReal)}${Number(c.CantidadReal) < Number(c.Cantidad) ? ' <span class="mono" style="color:var(--tomate);font-size:11px;">(merma)</span>' : ''}</td><td class="num">${fmtMoney(c.ValorUnitarioReal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="9">Sin compras aún.</td></tr>'}</tbody></table></div>
   </div>`));
 
   const preview = () => {
     const cant = Number(document.getElementById('com-cantidad').value)||0;
     const vu = Number(document.getElementById('com-valorunit').value)||0;
-    document.getElementById('com-total-preview').textContent = 'Valor total: ' + fmtMoney(cant*vu);
+    const desc = Number(document.getElementById('com-descuento').value)||0;
+    document.getElementById('com-total-preview').textContent = 'Valor total: ' + fmtMoney((cant*vu)-desc);
   };
   document.getElementById('com-cantidad').oninput = preview;
   document.getElementById('com-valorunit').oninput = preview;
+  document.getElementById('com-descuento').oninput = preview;
   wireArticuloOtro('com-articulo');
 
   document.getElementById('com-guardar').onclick = async () => {
@@ -448,76 +497,46 @@ function renderCompras(main){
       articulo: getArticuloValue('com-articulo'),
       unidad: document.getElementById('com-unidad').value,
       cantidad: document.getElementById('com-cantidad').value,
-      valorUnitario: document.getElementById('com-valorunit').value
+      valorUnitario: document.getElementById('com-valorunit').value,
+      descuento: document.getElementById('com-descuento').value || 0,
+      cantidadReal: document.getElementById('com-cantreal').value
     };
     if(!data.articulo || !data.cantidad || !data.valorUnitario) return showToast('Completa artículo, cantidad y valor unitario', true);
     const r = await apiPost('addCompra', data);
     if(r.ok){ STATE.compras.push(r.item); showToast('Compra guardada'); renderSection(); }
     else showToast(r.error, true);
   };
-}
 
-/* ======================= CONTROL DE CALIDAD ======================= */
-function renderCalidad(main){
-  main.appendChild(el(pageHead('Revisión en casa','Control de calidad','Después de comprar, descuenta la cantidad no idónea para recalcular el precio real por unidad.')));
-
-  const comprasSinControl = STATE.compras.filter(c => !STATE.calidad.some(k => k.IDCompra === c.ID));
-
-  const card = el(`<div class="card"><h3>Registrar control de calidad</h3>
-    <div class="grid">
-      <div class="field" style="grid-column:span 2;"><label>Compra</label>
-        <select id="cal-compra">
-          <option value="">Selecciona una compra…</option>
-          ${comprasSinControl.map(c=>`<option value="${c.ID}">${c.Fecha} · ${c.Articulo} · ${fmtNum(c.Cantidad)} ${c.Unidad} · ${fmtMoney(c.ValorTotal)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="field"><label>Cantidad real / idónea</label><input type="number" id="cal-cantreal" placeholder="0"></div>
-      <div class="field"><label>Observación</label><input type="text" id="cal-obs" placeholder="Ej. 2 libras dañadas"></div>
-    </div>
-    <div class="hint" id="cal-preview"></div>
-    <div class="row-actions"><button class="btn" id="cal-guardar">Guardar control</button></div>
-  </div>`);
-  main.appendChild(card);
-
-  main.appendChild(el(`<div class="card"><h3>Historial de control de calidad</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant. comprada</th><th class="num">Cant. real</th><th>Unidad</th><th class="num">V. unitario real</th><th>Observación</th></tr></thead>
-    <tbody>${STATE.calidad.slice().reverse().map(k=>`<tr><td>${k.Fecha}</td><td>${k.Articulo}</td><td class="num">${fmtNum(k.CantidadComprada)}</td><td class="num">${fmtNum(k.CantidadReal)}</td><td>${k.Unidad}</td><td class="num">${fmtMoney(k.ValorUnitarioReal)}</td><td>${k.Observacion||''}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="7">Sin controles registrados.</td></tr>'}</tbody></table></div>
-  </div>`));
-
-  const updatePreview = () => {
-    const compraId = document.getElementById('cal-compra').value;
-    const compra = STATE.compras.find(c => c.ID === compraId);
-    const cantReal = Number(document.getElementById('cal-cantreal').value)||0;
-    if(compra && cantReal>0){
-      const vuReal = Number(compra.ValorTotal)/cantReal;
-      document.getElementById('cal-preview').textContent = `Precio real recalculado: ${fmtMoney(compra.ValorTotal)} ÷ ${fmtNum(cantReal)} ${compra.Unidad} = ${fmtMoney(vuReal)} por ${compra.Unidad.toLowerCase()}`;
-    } else {
-      document.getElementById('cal-preview').textContent = '';
-    }
-  };
-  document.getElementById('cal-compra').onchange = updatePreview;
-  document.getElementById('cal-cantreal').oninput = updatePreview;
-
-  document.getElementById('cal-guardar').onclick = async () => {
-    const compraId = document.getElementById('cal-compra').value;
-    const compra = STATE.compras.find(c => c.ID === compraId);
-    if(!compra) return showToast('Selecciona la compra a controlar', true);
-    const cantReal = document.getElementById('cal-cantreal').value;
-    if(!cantReal) return showToast('Ingresa la cantidad real', true);
+  document.getElementById('ps-guardar').onclick = async () => {
+    const valor = document.getElementById('ps-valor').value;
+    if(!valor) return showToast('Ingresa el valor del gasto', true);
     const data = {
-      idCompra: compra.ID,
-      fecha: todayStr(),
-      articulo: compra.Articulo,
-      cantidadComprada: compra.Cantidad,
-      cantidadReal: cantReal,
-      unidad: compra.Unidad,
-      valorTotalCompra: compra.ValorTotal,
-      observacion: document.getElementById('cal-obs').value
+      fecha: document.getElementById('ps-fecha').value,
+      tipo: 'Operacional',
+      categoria: document.getElementById('ps-categoria').value,
+      concepto: document.getElementById('ps-concepto').value,
+      ingreso: 0,
+      egreso: valor
     };
-    const r = await apiPost('addControlCalidad', data);
-    if(r.ok){ STATE.calidad.push(r.item); showToast('Control de calidad guardado'); renderSection(); }
+    const r = await apiPost('addCaja', data);
+    if(r.ok){ STATE.caja.push(r.item); showToast('Gasto del día guardado'); renderSection(); }
     else showToast(r.error, true);
   };
+
+  function renderResumenDia(){
+    const fecha = document.getElementById('res-fecha').value;
+    const totalCompras = STATE.compras.filter(c=>c.Fecha===fecha).reduce((s,c)=> s + Number(c.ValorTotal||0), 0);
+    const totalProdServ = STATE.caja.filter(c=>c.Fecha===fecha).reduce((s,c)=> s + Number(c.Egreso||0), 0);
+    const totalGeneral = totalCompras + totalProdServ;
+    document.getElementById('res-contenido').innerHTML = `
+      <div class="kpi-row">
+        <div class="kpi"><div class="label">Total compras del día</div><div class="value">${fmtMoney(totalCompras)}</div></div>
+        <div class="kpi"><div class="label">Productos y servicios del día</div><div class="value">${fmtMoney(totalProdServ)}</div></div>
+        <div class="kpi tomate"><div class="label">Total del movimiento</div><div class="value">${fmtMoney(totalGeneral)}</div></div>
+      </div>`;
+  }
+  document.getElementById('res-fecha').onchange = renderResumenDia;
+  renderResumenDia();
 }
 
 /* ======================= VENTAS ======================= */
@@ -810,7 +829,7 @@ function renderHistCompras(main){
 
 /* ======================= HISTORIAL: VENTA REAL / EFECTIVA ======================= */
 function renderHistVentaReal(main){
-  main.appendChild(el(pageHead('Historial 2','Venta real (con control de calidad)','Producto realmente vendido por mes, considerando el descuento por pérdida en control de calidad.')));
+  main.appendChild(el(pageHead('Historial 2','Venta real (con costo real de compra)','Producto realmente vendido por mes, y la merma detectada al descartar mercancía dañada al comprar.')));
 
   const porArticulo = {};
   STATE.ventas.forEach(v => {
@@ -826,9 +845,10 @@ function renderHistVentaReal(main){
     <tbody>${rows.map(r=>`<tr><td class="mono">${r.mes}</td><td>${r.articulo}</td><td class="num">${fmtNum(r.cantidad)}</td><td>${r.unidad}</td><td class="num">${fmtMoney(r.cantidad>0?r.total/r.cantidad:0)}</td><td class="num">${fmtMoney(r.total)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Sin datos aún.</td></tr>'}</tbody></table></div>
   </div>`));
 
-  main.appendChild(el(`<div class="card"><h3>Pérdida detectada por control de calidad (referencia)</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Comprado</th><th class="num">Real (idóneo)</th><th class="num">Merma</th><th>Unidad</th></tr></thead>
-    <tbody>${STATE.calidad.slice().reverse().map(k=>`<tr><td>${k.Fecha}</td><td>${k.Articulo}</td><td class="num">${fmtNum(k.CantidadComprada)}</td><td class="num">${fmtNum(k.CantidadReal)}</td><td class="num">${fmtNum(k.CantidadComprada-k.CantidadReal)}</td><td>${k.Unidad}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Sin controles aún.</td></tr>'}</tbody></table></div>
+  const mermas = STATE.compras.filter(c => Number(c.CantidadReal) < Number(c.Cantidad));
+  main.appendChild(el(`<div class="card"><h3>Merma detectada al comprar (referencia)</h3>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Comprado</th><th class="num">Real (tras descarte)</th><th class="num">Merma</th><th>Unidad</th><th class="num">Costo real unit.</th></tr></thead>
+    <tbody>${mermas.slice().reverse().map(c=>`<tr><td>${c.Fecha}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td class="num">${fmtNum(c.CantidadReal)}</td><td class="num">${fmtNum(c.Cantidad-c.CantidadReal)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitarioReal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="7">Sin merma registrada aún.</td></tr>'}</tbody></table></div>
   </div>`));
 }
 
@@ -903,7 +923,7 @@ function renderCaja(main){
     <div class="grid">
       <div class="field"><label>Fecha</label><input type="date" id="caj-fecha" value="${todayStr()}"></div>
       <div class="field"><label>Tipo de flujo</label><select id="caj-tipo"><option value="Operacional">Operacional</option><option value="Inversion">Inversión</option><option value="Financiacion">Financiación</option></select></div>
-      <div class="field"><label>Categoría</label><select id="caj-categoria"><option>Transporte</option><option>Bolsas</option><option>Servicios (ayudante)</option><option>Otro</option></select></div>
+      <div class="field"><label>Categoría</label><select id="caj-categoria"><option>Transporte</option><option>Bolsas</option><option>Auxiliar de ventas</option><option>Otro</option></select></div>
       <div class="field"><label>Concepto</label><input type="text" id="caj-concepto" placeholder="Detalle"></div>
       <div class="field"><label>Ingreso</label><input type="number" id="caj-ingreso" placeholder="0"></div>
       <div class="field"><label>Egreso</label><input type="number" id="caj-egreso" placeholder="0"></div>
