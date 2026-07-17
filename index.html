@@ -281,6 +281,12 @@ function fmtNum(n, dec=2){
   n = Number(n)||0;
   return n.toLocaleString('es-CO', {maximumFractionDigits:dec});
 }
+function fmtDate(iso){
+  if(!iso) return '';
+  const p = String(iso).split('-');
+  if(p.length !== 3) return iso;
+  return `${p[2]}/${p[1]}/${p[0]}`;
+}
 function todayStr(){
   const d = new Date();
   return d.toISOString().slice(0,10);
@@ -390,12 +396,12 @@ function renderDashboard(main){
 
   main.appendChild(el(`<div class="card"><h3>Últimas compras</h3>
     <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th>Cant.</th><th>Unidad</th><th class="num">Valor total</th></tr></thead>
-    <tbody>${STATE.compras.slice(-5).reverse().map(c=>`<tr><td>${c.Fecha}</td><td>${c.Articulo}</td><td>${fmtNum(c.Cantidad)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorTotal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="5">Aún no hay compras registradas.</td></tr>'}</tbody></table></div>
+    <tbody>${STATE.compras.slice(-5).reverse().map(c=>`<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Articulo}</td><td>${fmtNum(c.Cantidad)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorTotal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="5">Aún no hay compras registradas.</td></tr>'}</tbody></table></div>
   </div>`));
 
   main.appendChild(el(`<div class="card"><h3>Últimas ventas</h3>
     <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th>Cant.</th><th>Unidad</th><th class="num">Valor total</th><th>Tipo</th></tr></thead>
-    <tbody>${STATE.ventas.slice(-5).reverse().map(v=>`<tr><td>${v.Fecha}</td><td>${v.Articulo}</td><td>${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Aún no hay ventas registradas.</td></tr>'}</tbody></table></div>
+    <tbody>${STATE.ventas.slice(-5).reverse().map(v=>`<tr><td>${fmtDate(v.Fecha)}</td><td>${v.Articulo}</td><td>${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Aún no hay ventas registradas.</td></tr>'}</tbody></table></div>
   </div>`));
 }
 
@@ -419,7 +425,7 @@ function renderCapital(main){
 
   main.appendChild(el(`<div class="card"><h3>Movimientos</h3>
     <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Concepto</th><th>Tipo</th><th class="num">Monto</th></tr></thead>
-    <tbody>${STATE.capital.slice().reverse().map(c=>`<tr><td>${c.Fecha}</td><td>${c.Concepto}</td><td>${c.Tipo}</td><td class="num">${fmtMoney(c.Monto)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="4">Sin movimientos aún.</td></tr>'}</tbody></table></div>
+    <tbody>${STATE.capital.slice().reverse().map(c=>`<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Concepto}</td><td>${c.Tipo}</td><td class="num">${fmtMoney(c.Monto)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="4">Sin movimientos aún.</td></tr>'}</tbody></table></div>
   </div>`));
 
   document.getElementById('cap-guardar').onclick = async () => {
@@ -438,7 +444,7 @@ function renderCapital(main){
 
 /* ======================= COMPRAS ======================= */
 function renderCompras(main){
-  main.appendChild(el(pageHead('Abastos','Compras','Registra cada compra. Si al revisar en casa descartas mercancía dañada, anota la cantidad real para calcular el costo real de lo que sale a la venta.')));
+  main.appendChild(el(pageHead('Abastos','Compras','Registra la compra al momento de comprar en Cenabastos. La revisión de cantidad real se hace después, en casa, en la sección de abajo.')));
 
   const card = el(`<div class="card"><h3>Nueva compra</h3>
     <div class="grid">
@@ -447,8 +453,7 @@ function renderCompras(main){
       <div class="field"><label>Unidad de medida</label><select id="com-unidad">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
       <div class="field"><label>Cantidad comprada</label><input type="number" id="com-cantidad" placeholder="0"></div>
       <div class="field"><label>Valor unitario</label><input type="number" id="com-valorunit" placeholder="0"></div>
-      <div class="field"><label>Descuento</label><input type="number" id="com-descuento" placeholder="0"></div>
-      <div class="field"><label>Cantidad real (tras descartar lo dañado)</label><input type="number" id="com-cantreal" placeholder="Igual a la comprada si no descartaste nada"></div>
+      <div class="field"><label>Descuento (sobre el total, si te lo dieron)</label><input type="number" id="com-descuento" placeholder="0"></div>
     </div>
     <div class="hint" id="com-total-preview">Valor total: $ 0</div>
     <div class="row-actions"><button class="btn" id="com-guardar">Guardar compra</button></div>
@@ -456,7 +461,7 @@ function renderCompras(main){
   main.appendChild(card);
 
   const productosServCard = el(`<div class="card"><h3>Productos y servicios del día</h3>
-    <div class="hint" style="margin-bottom:10px;">Bolsas, transporte, auxiliar de ventas u otros gastos del día. Esto se guarda en el flujo de caja operacional.</div>
+    <div class="hint" style="margin-bottom:10px;">Bolsas, transporte, auxiliar de ventas u otros gastos del día. Esto se guarda en el flujo de caja operacional (lo mismo que "Flujo de caja", solo que aquí es más rápido para el día a día).</div>
     <div class="grid">
       <div class="field"><label>Fecha</label><input type="date" id="ps-fecha" value="${todayStr()}"></div>
       <div class="field"><label>Categoría</label><select id="ps-categoria"><option>Bolsas</option><option>Transporte</option><option>Auxiliar de ventas</option><option>Otro</option></select></div>
@@ -467,6 +472,21 @@ function renderCompras(main){
   </div>`);
   main.appendChild(productosServCard);
 
+  const revisionCard = el(`<div class="card"><h3>Cantidad real comprada (revisión en casa)</h3>
+    <div class="hint" style="margin-bottom:10px;">Después de regresar de Cenabastos, revisa cada compra y descarta lo dañado. Selecciona la compra y anota cuánto quedó realmente disponible para vender — con eso se recalcula el costo real por unidad. También puedes ajustar aquí el descuento si te lo confirman después.</div>
+    <div class="grid">
+      <div class="field"><label>Fecha de la compra</label><input type="date" id="rev-fecha" value="${todayStr()}"></div>
+      <div class="field" style="grid-column:span 2;"><label>Compra a revisar</label><select id="rev-compra"><option value="">Selecciona una compra…</option></select></div>
+    </div>
+    <div class="grid" style="margin-top:10px;">
+      <div class="field"><label>Descuento</label><input type="number" id="rev-descuento" placeholder="0"></div>
+      <div class="field"><label>Cantidad real (tras descartar lo dañado)</label><input type="number" id="rev-cantreal" placeholder="0"></div>
+    </div>
+    <div class="hint" id="rev-preview"></div>
+    <div class="row-actions"><button class="btn secondary" id="rev-guardar">Guardar revisión</button></div>
+  </div>`);
+  main.appendChild(revisionCard);
+
   const resumenCard = el(`<div class="card"><h3>Resumen del día</h3>
     <div class="grid" style="margin-bottom:14px;">
       <div class="field"><label>Ver resumen de la fecha</label><input type="date" id="res-fecha" value="${todayStr()}"></div>
@@ -476,8 +496,8 @@ function renderCompras(main){
   main.appendChild(resumenCard);
 
   main.appendChild(el(`<div class="card"><h3>Compras registradas</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">V. unitario</th><th class="num">Descuento</th><th class="num">V. total</th><th class="num">Cant. real</th><th class="num">Costo real unit.</th></tr></thead>
-    <tbody>${STATE.compras.slice().reverse().map(c=>`<tr><td>${c.Fecha}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitario)}</td><td class="num">${fmtMoney(c.Descuento)}</td><td class="num">${fmtMoney(c.ValorTotal)}</td><td class="num">${fmtNum(c.CantidadReal)}${Number(c.CantidadReal) < Number(c.Cantidad) ? ' <span class="mono" style="color:var(--tomate);font-size:11px;">(merma)</span>' : ''}</td><td class="num">${fmtMoney(c.ValorUnitarioReal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="9">Sin compras aún.</td></tr>'}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">V. unitario</th><th class="num">V. total</th><th class="num">Descuento</th><th class="num">Cant. real</th><th class="num">Costo real unit.</th></tr></thead>
+    <tbody>${STATE.compras.slice().reverse().map(c=>`<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitario)}</td><td class="num">${fmtMoney(c.ValorTotal)}</td><td class="num">${fmtMoney(c.Descuento)}</td><td class="num">${fmtNum(c.CantidadReal)}${Number(c.CantidadReal) < Number(c.Cantidad) ? ' <span class="mono" style="color:var(--tomate);font-size:11px;">(merma)</span>' : ''}</td><td class="num">${fmtMoney(c.ValorUnitarioReal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="9">Sin compras aún.</td></tr>'}</tbody></table></div>
   </div>`));
 
   const preview = () => {
@@ -498,8 +518,7 @@ function renderCompras(main){
       unidad: document.getElementById('com-unidad').value,
       cantidad: document.getElementById('com-cantidad').value,
       valorUnitario: document.getElementById('com-valorunit').value,
-      descuento: document.getElementById('com-descuento').value || 0,
-      cantidadReal: document.getElementById('com-cantreal').value
+      descuento: document.getElementById('com-descuento').value || 0
     };
     if(!data.articulo || !data.cantidad || !data.valorUnitario) return showToast('Completa artículo, cantidad y valor unitario', true);
     const r = await apiPost('addCompra', data);
@@ -521,6 +540,61 @@ function renderCompras(main){
     const r = await apiPost('addCaja', data);
     if(r.ok){ STATE.caja.push(r.item); showToast('Gasto del día guardado'); renderSection(); }
     else showToast(r.error, true);
+  };
+
+  // ---- Revisión en casa: cantidad real y descuento ----
+  const revFecha = document.getElementById('rev-fecha');
+  const revCompraSel = document.getElementById('rev-compra');
+  const revDescuento = document.getElementById('rev-descuento');
+  const revCantReal = document.getElementById('rev-cantreal');
+  const revPreview = document.getElementById('rev-preview');
+
+  function poblarComprasDelDia(){
+    const fecha = revFecha.value;
+    const compras = STATE.compras.filter(c => c.Fecha === fecha);
+    revCompraSel.innerHTML = '<option value="">Selecciona una compra…</option>' +
+      compras.map(c => `<option value="${c.ID}">${c.Articulo} · ${fmtNum(c.Cantidad)} ${c.Unidad} · ${fmtMoney(c.ValorTotal)}</option>`).join('');
+    revDescuento.value = '';
+    revCantReal.value = '';
+    revPreview.textContent = compras.length ? '' : 'No hay compras registradas en esa fecha todavía.';
+  }
+  revFecha.addEventListener('change', poblarComprasDelDia);
+  poblarComprasDelDia();
+
+  revCompraSel.addEventListener('change', () => {
+    const compra = STATE.compras.find(c => c.ID === revCompraSel.value);
+    if(compra){
+      revDescuento.value = compra.Descuento || 0;
+      revCantReal.value = compra.CantidadReal || compra.Cantidad;
+      actualizarRevPreview();
+    }
+  });
+
+  function actualizarRevPreview(){
+    const compra = STATE.compras.find(c => c.ID === revCompraSel.value);
+    if(!compra) return;
+    const valorTotal = (Number(compra.Cantidad) * Number(compra.ValorUnitario)) - (Number(revDescuento.value)||0);
+    const cantReal = Number(revCantReal.value) || Number(compra.Cantidad);
+    const vuReal = cantReal>0 ? valorTotal/cantReal : 0;
+    revPreview.textContent = `Nuevo valor total: ${fmtMoney(valorTotal)} · Costo real por ${compra.Unidad.toLowerCase()}: ${fmtMoney(vuReal)}`;
+  }
+  revDescuento.addEventListener('input', actualizarRevPreview);
+  revCantReal.addEventListener('input', actualizarRevPreview);
+
+  document.getElementById('rev-guardar').onclick = async () => {
+    const compra = STATE.compras.find(c => c.ID === revCompraSel.value);
+    if(!compra) return showToast('Selecciona la compra a revisar', true);
+    const data = {
+      id: compra.ID,
+      descuento: revDescuento.value,
+      cantidadReal: revCantReal.value
+    };
+    const r = await apiPost('updateCompra', data);
+    if(r.ok){
+      Object.assign(compra, r.item);
+      showToast('Revisión guardada');
+      renderSection();
+    } else showToast(r.error, true);
   };
 
   function renderResumenDia(){
@@ -583,7 +657,7 @@ function renderVentas(main){
     <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">V. unit. real</th><th class="num">V. total</th><th>Pago</th><th>Cliente</th></tr></thead>
     <tbody>${STATE.ventas.slice().reverse().map(v=>{
       const cli = STATE.clientes.find(c=>c.ID===v.IDCliente);
-      return `<tr><td>${v.Fecha}</td><td>${v.Articulo}</td><td class="num">${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorUnitarioReal)}${v.EsPrecioCerrado?' <span class="mono" style="color:var(--tomate);font-size:11px;">(remate)</span>':''}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td><td>${cli?cli.Nombre:'—'}</td></tr>`;
+      return `<tr><td>${fmtDate(v.Fecha)}</td><td>${v.Articulo}</td><td class="num">${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorUnitarioReal)}${v.EsPrecioCerrado?' <span class="mono" style="color:var(--tomate);font-size:11px;">(remate)</span>':''}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td><td>${cli?cli.Nombre:'—'}</td></tr>`;
     }).join('') || '<tr class="empty-row"><td colspan="8">Sin ventas aún.</td></tr>'}</tbody></table></div>
   </div>`));
 
@@ -753,7 +827,7 @@ function renderClienteDetalle(main, id){
 
   main.appendChild(el(`<div class="card"><h3>Historial de compras (contado y fiado)</h3>
     <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">Valor</th><th>Pago</th></tr></thead>
-    <tbody>${todasCompras.map(v=>`<tr><td>${v.Fecha}</td><td>${v.Articulo}</td><td class="num">${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Este cliente aún no tiene compras registradas.</td></tr>'}</tbody></table></div>
+    <tbody>${todasCompras.map(v=>`<tr><td>${fmtDate(v.Fecha)}</td><td>${v.Articulo}</td><td class="num">${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Este cliente aún no tiene compras registradas.</td></tr>'}</tbody></table></div>
   </div>`));
 
   const compras = STATE.fiado.filter(f => f.IDCliente === id).slice().reverse();
@@ -767,7 +841,7 @@ function renderClienteDetalle(main, id){
   const tableWrap = el(`<div class="card"><h3>Historial de compras a crédito</h3>
     <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">Valor</th><th class="num">Abonado</th><th class="num">Saldo</th><th>Estado</th><th></th></tr></thead>
     <tbody>${compras.map(f=>`<tr>
-      <td>${f.Fecha}</td><td>${f.Articulo}</td><td class="num">${fmtNum(f.Cantidad)}</td><td>${f.Unidad}</td>
+      <td>${fmtDate(f.Fecha)}</td><td>${f.Articulo}</td><td class="num">${fmtNum(f.Cantidad)}</td><td>${f.Unidad}</td>
       <td class="num">${fmtMoney(f.ValorTotal)}</td><td class="num">${fmtMoney(f.Abonado)}</td><td class="num">${fmtMoney(f.Saldo)}</td>
       <td><span class="badge ${f.Estado==='Pagado'?'pagado':'pendiente'}">${f.Estado}</span></td>
       <td>${f.Estado!=='Pagado' ? `<button class="btn small secondary" onclick="abrirAbono('${f.ID}')">Abonar</button>` : ''}</td>
@@ -788,7 +862,7 @@ function renderClienteDetalle(main, id){
   window.abrirAbono = (fiadoId) => {
     const f = compras.find(x => x.ID === fiadoId);
     document.getElementById('abono-card').style.display = 'block';
-    document.getElementById('abono-ref').value = `${f.Fecha} · ${f.Articulo} · saldo ${fmtMoney(f.Saldo)}`;
+    document.getElementById('abono-ref').value = `${fmtDate(f.Fecha)} · ${f.Articulo} · saldo ${fmtMoney(f.Saldo)}`;
     document.getElementById('abono-card').dataset.fiadoId = fiadoId;
     document.getElementById('abono-card').scrollIntoView({behavior:'smooth'});
   };
@@ -848,7 +922,7 @@ function renderHistVentaReal(main){
   const mermas = STATE.compras.filter(c => Number(c.CantidadReal) < Number(c.Cantidad));
   main.appendChild(el(`<div class="card"><h3>Merma detectada al comprar (referencia)</h3>
     <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Comprado</th><th class="num">Real (tras descarte)</th><th class="num">Merma</th><th>Unidad</th><th class="num">Costo real unit.</th></tr></thead>
-    <tbody>${mermas.slice().reverse().map(c=>`<tr><td>${c.Fecha}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td class="num">${fmtNum(c.CantidadReal)}</td><td class="num">${fmtNum(c.Cantidad-c.CantidadReal)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitarioReal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="7">Sin merma registrada aún.</td></tr>'}</tbody></table></div>
+    <tbody>${mermas.slice().reverse().map(c=>`<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td class="num">${fmtNum(c.CantidadReal)}</td><td class="num">${fmtNum(c.Cantidad-c.CantidadReal)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitarioReal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="7">Sin merma registrada aún.</td></tr>'}</tbody></table></div>
   </div>`));
 }
 
@@ -917,7 +991,7 @@ function renderHistVentaCliente(main){
 
 /* ======================= FLUJO DE CAJA ======================= */
 function renderCaja(main){
-  main.appendChild(el(pageHead('Costos operativos','Flujo de caja','Registra transporte, bolsas, servicios de terceros y demás movimientos de caja.')));
+  main.appendChild(el(pageHead('Costos operativos','Flujo de caja','Este es el registro completo de todo el movimiento de caja del negocio: no solo los gastos diarios (que puedes registrar más rápido desde "Productos y servicios del día" en Compras), sino también inversiones (compra de equipo, vehículo) o financiación (préstamos). "Guardar movimiento" agrega ese registro al flujo de caja.')));
 
   const card = el(`<div class="card"><h3>Nuevo movimiento de caja</h3>
     <div class="grid">
@@ -943,7 +1017,7 @@ function renderCaja(main){
 
   main.appendChild(el(`<div class="card"><h3>Movimientos de caja</h3>
     <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Categoría</th><th>Concepto</th><th class="num">Ingreso</th><th class="num">Egreso</th></tr></thead>
-    <tbody>${STATE.caja.slice().reverse().map(c=>`<tr><td>${c.Fecha}</td><td>${c.Tipo}</td><td>${c.Categoria}</td><td>${c.Concepto}</td><td class="num">${fmtMoney(c.Ingreso)}</td><td class="num">${fmtMoney(c.Egreso)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Sin movimientos aún.</td></tr>'}</tbody></table></div>
+    <tbody>${STATE.caja.slice().reverse().map(c=>`<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Tipo}</td><td>${c.Categoria}</td><td>${c.Concepto}</td><td class="num">${fmtMoney(c.Ingreso)}</td><td class="num">${fmtMoney(c.Egreso)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Sin movimientos aún.</td></tr>'}</tbody></table></div>
   </div>`));
 
   document.getElementById('caj-guardar').onclick = async () => {
