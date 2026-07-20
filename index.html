@@ -165,6 +165,25 @@
     nav.sidebar{width:100%; height:auto; position:relative;}
     main{padding:20px;}
   }
+
+  /* ---------- carrito (compras / ventas multi-articulo) ---------- */
+  .cart-line{
+    background:var(--papel); border:1px solid var(--borde); border-radius:8px;
+    padding:14px; margin-bottom:10px; position:relative;
+  }
+  .cart-line .grid{margin-bottom:0;}
+  .cart-line-remove{
+    position:absolute; top:10px; right:10px; background:transparent; border:none;
+    color:var(--tomate); cursor:pointer; font-size:16px; font-weight:700; line-height:1; padding:2px 6px;
+  }
+  .cart-line-remove:hover{background:rgba(193,68,14,0.1); border-radius:4px;}
+  .cart-line-num{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--tinta-suave); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.05em;}
+  .cart-total-bar{
+    display:flex; justify-content:space-between; align-items:center; padding:14px 16px;
+    background:var(--papel-oscuro); border-radius:8px; margin:14px 0;
+  }
+  .cart-total-bar .label{font-size:12px; text-transform:uppercase; letter-spacing:0.04em; color:var(--tinta-suave); font-weight:600;}
+  .cart-total-bar .value{font-family:'IBM Plex Mono',monospace; font-size:20px; font-weight:700; color:var(--verde-hoja);}
 </style>
 </head>
 <body>
@@ -193,7 +212,6 @@
 <script>
 /* ======================= CONFIG ======================= */
 const CONFIG = {
-  // Pega aquí la URL de tu implementación de Apps Script (Ver instrucciones en SETUP.md)
   API_URL: 'https://script.google.com/macros/s/AKfycbyDYOb0F_4Rzhctyo6Np3e-mRgzVtXSg8AR6493z__wKmav-mtf2SiSfW4yyD8FmF1c-A/exec'
 };
 
@@ -208,7 +226,11 @@ const ARTICULOS = [
 ];
 
 let STATE = {
-  capital: [], compras: [], calidad: [], ventas: [], clientes: [], fiado: [], abonos: [], caja: [], preciosDia: []
+  capital: [], preciosDia: [],
+  comprasCab: [], comprasDet: [],
+  clientes: [],
+  ventasCab: [], ventasDet: [],
+  abonos: [], caja: []
 };
 let currentSection = 'dashboard';
 let currentClientId = null;
@@ -242,6 +264,20 @@ async function loadAll(){
   document.getElementById('app').style.display = 'flex';
   renderNav();
   renderSection();
+}
+
+/* ======================= DATOS DERIVADOS (carrito -> vistas planas) ======================= */
+function comprasFlat(){
+  return STATE.comprasDet.map(d => {
+    const cab = STATE.comprasCab.find(c => c.ID === d.IDCompraCabecera) || {};
+    return Object.assign({}, d, { Fecha: cab.Fecha, Hora: cab.Hora, Proveedor: cab.Proveedor });
+  });
+}
+function ventasFlat(){
+  return STATE.ventasDet.map(d => {
+    const cab = STATE.ventasCab.find(c => c.ID === d.IDVentaCabecera) || {};
+    return Object.assign({}, d, { Fecha: cab.Fecha, Hora: cab.Hora, IDCliente: cab.IDCliente, Abono: cab.Abono, Saldo: cab.Saldo, Estado: cab.Estado });
+  });
 }
 
 /* ======================= NAV ======================= */
@@ -291,8 +327,12 @@ function todayStr(){
   const d = new Date();
   return d.toISOString().slice(0,10);
 }
+function horaActual(){
+  const d = new Date();
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
 function monthKey(dateStr){
-  return (dateStr||'').slice(0,7); // yyyy-mm
+  return (dateStr||'').slice(0,7);
 }
 function showToast(msg, isErr){
   const t = document.getElementById('toast');
@@ -305,22 +345,24 @@ function el(html){
   div.innerHTML = html.trim();
   return div.firstChild;
 }
-
 function selectArticuloHTML(id){
   return `<select id="${id}">${ARTICULOS.map(a=>`<option>${a}</option>`).join('')}</select>
     <input type="text" id="${id}-otro" placeholder="Escribe el nombre del artículo" style="display:none; margin-top:6px;">`;
 }
-function wireArticuloOtro(id){
+function wireArticuloOtro(id, onChangeExtra){
   const sel = document.getElementById(id);
   const otro = document.getElementById(id + '-otro');
   sel.addEventListener('change', () => {
     otro.style.display = sel.value === 'Otro (escribir manualmente)' ? 'block' : 'none';
+    if(onChangeExtra) onChangeExtra();
   });
 }
 function getArticuloValue(id){
   const sel = document.getElementById(id);
+  if(!sel) return '';
   if(sel.value === 'Otro (escribir manualmente)'){
-    return document.getElementById(id + '-otro').value.trim();
+    const otro = document.getElementById(id + '-otro');
+    return otro ? otro.value.trim() : '';
   }
   return sel.value;
 }
@@ -333,8 +375,8 @@ function renderSection(){
     case 'dashboard': return renderDashboard(main);
     case 'capital': return renderCapital(main);
     case 'compras': return renderCompras(main);
-    case 'ventas': return renderVentas(main);
     case 'clientes': return renderClientes(main);
+    case 'ventas': return renderVentas(main);
     case 'historial-compras': return renderHistCompras(main);
     case 'historial-venta-real': return renderHistVentaReal(main);
     case 'historial-venta-cliente': return renderHistVentaCliente(main);
@@ -353,10 +395,10 @@ function pageHead(eyebrow, title, desc){
 /* ======================= DASHBOARD ======================= */
 function renderDashboard(main){
   const totalCapital = STATE.capital.reduce((s,c)=> s + (c.Tipo==='Retiro'? -Number(c.Monto): Number(c.Monto)), 0);
-  const totalCompras = STATE.compras.reduce((s,c)=> s + Number(c.ValorTotal||0), 0);
-  const totalVentas = STATE.ventas.reduce((s,v)=> s + Number(v.ValorTotal||0), 0);
+  const totalCompras = STATE.comprasCab.reduce((s,c)=> s + Number(c.ValorTotal||0), 0);
+  const totalVentas = STATE.ventasCab.reduce((s,v)=> s + Number(v.ValorTotal||0), 0);
   const totalCaja = STATE.caja.reduce((s,c)=> s + Number(c.Ingreso||0) - Number(c.Egreso||0), 0);
-  const deudaClientes = STATE.fiado.reduce((s,f)=> s + Number(f.Saldo||0), 0);
+  const deudaClientes = STATE.ventasCab.reduce((s,v)=> s + Number(v.Saldo||0), 0);
 
   main.appendChild(el(pageHead('Panorama general','Resumen del negocio','Vista rápida del capital, compras, ventas y cartera de clientes.')));
 
@@ -378,9 +420,9 @@ function renderDashboard(main){
 
   function renderBalanceDia(){
     const fecha = document.getElementById('bal-fecha').value;
-    const compras = STATE.compras.filter(c=>c.Fecha===fecha).reduce((s,c)=> s + Number(c.ValorTotal||0), 0);
+    const compras = STATE.comprasCab.filter(c=>c.Fecha===fecha).reduce((s,c)=> s + Number(c.ValorTotal||0), 0);
     const prodServ = STATE.caja.filter(c=>c.Fecha===fecha).reduce((s,c)=> s + Number(c.Egreso||0), 0);
-    const ventas = STATE.ventas.filter(v=>v.Fecha===fecha).reduce((s,v)=> s + Number(v.ValorTotal||0), 0);
+    const ventas = STATE.ventasCab.filter(v=>v.Fecha===fecha).reduce((s,v)=> s + Number(v.ValorTotal||0), 0);
     const utilidad = ventas - compras - prodServ;
     document.getElementById('bal-contenido').innerHTML = `
       <div class="kpi-row">
@@ -394,14 +436,23 @@ function renderDashboard(main){
   document.getElementById('bal-fecha').onchange = renderBalanceDia;
   renderBalanceDia();
 
+  const comprasRecientes = STATE.comprasCab.slice().reverse().slice(0,5);
   main.appendChild(el(`<div class="card"><h3>Últimas compras</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th>Cant.</th><th>Unidad</th><th class="num">Valor total</th></tr></thead>
-    <tbody>${STATE.compras.slice(-5).reverse().map(c=>`<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Articulo}</td><td>${fmtNum(c.Cantidad)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorTotal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="5">Aún no hay compras registradas.</td></tr>'}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Proveedor</th><th class="num">N.° artículos</th><th class="num">Valor total</th></tr></thead>
+    <tbody>${comprasRecientes.map(c=>{
+      const nArt = STATE.comprasDet.filter(d=>d.IDCompraCabecera===c.ID).length;
+      return `<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Hora||''}</td><td>${c.Proveedor||'—'}</td><td class="num">${nArt}</td><td class="num">${fmtMoney(c.ValorTotal)}</td></tr>`;
+    }).join('') || '<tr class="empty-row"><td colspan="5">Aún no hay compras registradas.</td></tr>'}</tbody></table></div>
   </div>`));
 
+  const ventasRecientes = STATE.ventasCab.slice().reverse().slice(0,5);
   main.appendChild(el(`<div class="card"><h3>Últimas ventas</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th>Cant.</th><th>Unidad</th><th class="num">Valor total</th><th>Tipo</th></tr></thead>
-    <tbody>${STATE.ventas.slice(-5).reverse().map(v=>`<tr><td>${fmtDate(v.Fecha)}</td><td>${v.Articulo}</td><td>${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Aún no hay ventas registradas.</td></tr>'}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Cliente</th><th class="num">N.° artículos</th><th class="num">Valor total</th><th>Estado</th></tr></thead>
+    <tbody>${ventasRecientes.map(v=>{
+      const cli = STATE.clientes.find(c=>c.ID===v.IDCliente);
+      const nArt = STATE.ventasDet.filter(d=>d.IDVentaCabecera===v.ID).length;
+      return `<tr><td>${fmtDate(v.Fecha)}</td><td>${v.Hora||''}</td><td>${cli?cli.Nombre:'Contado'}</td><td class="num">${nArt}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.Estado==='Pagado'?'pagado':'pendiente'}">${v.Estado}</span></td></tr>`;
+    }).join('') || '<tr class="empty-row"><td colspan="6">Aún no hay ventas registradas.</td></tr>'}</tbody></table></div>
   </div>`));
 }
 
@@ -437,28 +488,81 @@ function renderCapital(main){
     };
     if(!data.concepto || !data.monto) return showToast('Completa concepto y monto', true);
     const r = await apiPost('addCapital', data);
-    if(r.ok){ STATE.capital.push(r.item); showToast('Movimiento guardado'); renderCapital(main); main.innerHTML=''; renderSection(); }
+    if(r.ok){ showToast('Movimiento guardado'); await loadAll(); goTo('capital'); }
     else showToast(r.error, true);
   };
 }
 
-/* ======================= COMPRAS ======================= */
+/* ======================= COMPRAS (carrito: varios artículos por compra) ======================= */
+let compraLineCounter = 0;
+let compraLineIds = [];
+
+function compraLineTemplate(n){
+  return `<div class="cart-line" data-line="${n}">
+    <button type="button" class="cart-line-remove" onclick="removeCompraLine(${n})" title="Quitar artículo">×</button>
+    <div class="grid">
+      <div class="field"><label>Artículo</label>${selectArticuloHTML('com-art-'+n)}</div>
+      <div class="field"><label>Unidad</label><select id="com-uni-${n}">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
+      <div class="field"><label>Cantidad</label><input type="number" id="com-cant-${n}" placeholder="0"></div>
+      <div class="field"><label>Valor unitario</label><input type="number" id="com-vu-${n}" placeholder="0"></div>
+      <div class="field"><label>Descuento (sobre el total)</label><input type="number" id="com-desc-${n}" placeholder="0"></div>
+    </div>
+    <div class="hint mono" id="com-sub-${n}">Subtotal: $ 0</div>
+  </div>`;
+}
+
+function addCompraLine(){
+  compraLineCounter++;
+  const n = compraLineCounter;
+  compraLineIds.push(n);
+  const container = document.getElementById('com-lineas');
+  container.appendChild(el(compraLineTemplate(n)));
+  wireArticuloOtro('com-art-'+n);
+  ['com-cant-'+n, 'com-vu-'+n, 'com-desc-'+n].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => updateCompraTotales());
+  });
+  updateCompraTotales();
+}
+function removeCompraLine(n){
+  if(compraLineIds.length <= 1) return showToast('Debe quedar al menos un artículo', true);
+  const el = document.querySelector(`.cart-line[data-line="${n}"]`);
+  if(el) el.remove();
+  compraLineIds = compraLineIds.filter(x => x !== n);
+  updateCompraTotales();
+}
+function updateCompraTotales(){
+  let total = 0;
+  compraLineIds.forEach(n => {
+    const cant = Number(document.getElementById('com-cant-'+n).value)||0;
+    const vu = Number(document.getElementById('com-vu-'+n).value)||0;
+    const desc = Number(document.getElementById('com-desc-'+n).value)||0;
+    const sub = (cant*vu) - desc;
+    total += sub;
+    const subEl = document.getElementById('com-sub-'+n);
+    if(subEl) subEl.textContent = 'Subtotal: ' + fmtMoney(sub);
+  });
+  const totalEl = document.getElementById('com-total-display');
+  if(totalEl) totalEl.textContent = fmtMoney(total);
+}
+
 function renderCompras(main){
-  main.appendChild(el(pageHead('Abastos','Compras','Registra la compra al momento de comprar en Cenabastos. La revisión de cantidad real se hace después, en casa, en la sección de abajo.')));
+  compraLineCounter = 0;
+  compraLineIds = [];
+
+  main.appendChild(el(pageHead('Abastos','Compras','Registra todos los artículos que compraste en un mismo proveedor/galpón como una sola compra. La revisión de cantidad efectiva se hace después, en casa, en la sección de abajo.')));
 
   const card = el(`<div class="card"><h3>Nueva compra</h3>
-    <div class="grid">
+    <div class="grid" style="margin-bottom:14px;">
       <div class="field"><label>Fecha</label><input type="date" id="com-fecha" value="${todayStr()}"></div>
-      <div class="field"><label>Artículo</label>${selectArticuloHTML('com-articulo')}</div>
-      <div class="field"><label>Unidad de medida</label><select id="com-unidad">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
-      <div class="field"><label>Cantidad comprada</label><input type="number" id="com-cantidad" placeholder="0"></div>
-      <div class="field"><label>Valor unitario</label><input type="number" id="com-valorunit" placeholder="0"></div>
-      <div class="field"><label>Descuento (sobre el total, si te lo dieron)</label><input type="number" id="com-descuento" placeholder="0"></div>
+      <div class="field" style="grid-column:span 2;"><label>Proveedor (galpón / local en Cenabastos)</label><input type="text" id="com-proveedor" placeholder="Ej. Galpón El Paisa (opcional)"></div>
     </div>
-    <div class="hint" id="com-total-preview">Valor total: $ 0</div>
+    <div id="com-lineas"></div>
+    <div class="row-actions" style="margin-bottom:6px;"><button class="btn secondary" type="button" onclick="addCompraLine()">+ Agregar artículo</button></div>
+    <div class="cart-total-bar"><span class="label">Total de la compra</span><span class="value" id="com-total-display">$ 0</span></div>
     <div class="row-actions"><button class="btn" id="com-guardar">Guardar compra</button></div>
   </div>`);
   main.appendChild(card);
+  addCompraLine();
 
   const productosServCard = el(`<div class="card"><h3>Productos y servicios del día</h3>
     <div class="hint" style="margin-bottom:10px;">Bolsas, transporte, auxiliar de ventas u otros gastos del día. Esto se guarda en el flujo de caja operacional (lo mismo que "Flujo de caja", solo que aquí es más rápido para el día a día).</div>
@@ -472,15 +576,16 @@ function renderCompras(main){
   </div>`);
   main.appendChild(productosServCard);
 
-  const revisionCard = el(`<div class="card"><h3>Cantidad real comprada (revisión en casa)</h3>
-    <div class="hint" style="margin-bottom:10px;">Después de regresar de Cenabastos, revisa cada compra y descarta lo dañado. Selecciona la compra y anota cuánto quedó realmente disponible para vender — con eso se recalcula el costo real por unidad. También puedes ajustar aquí el descuento si te lo confirman después.</div>
+  const detallesPlanos = comprasFlat();
+  const revisionCard = el(`<div class="card"><h3>Cantidad efectiva comprada (revisión en casa)</h3>
+    <div class="hint" style="margin-bottom:10px;">El peso o cantidad que finalmente queda lista para vender casi siempre es menor a la comprada: al desgranar o desvainar (ej. frijol en concha), al reempacar en bolsas más pequeñas se pierde algo de peso (ej. mora), o porque se descarta mercancía dañada. Selecciona el artículo y anota cuánto quedó realmente — con eso se recalcula el costo real por unidad.</div>
     <div class="grid">
       <div class="field"><label>Fecha de la compra</label><input type="date" id="rev-fecha" value="${todayStr()}"></div>
-      <div class="field" style="grid-column:span 2;"><label>Compra a revisar</label><select id="rev-compra"><option value="">Selecciona una compra…</option></select></div>
+      <div class="field" style="grid-column:span 2;"><label>Artículo a revisar</label><select id="rev-compra"><option value="">Selecciona un artículo…</option></select></div>
     </div>
     <div class="grid" style="margin-top:10px;">
       <div class="field"><label>Descuento</label><input type="number" id="rev-descuento" placeholder="0"></div>
-      <div class="field"><label>Cantidad real (tras descartar lo dañado)</label><input type="number" id="rev-cantreal" placeholder="0"></div>
+      <div class="field"><label>Cantidad efectiva (lista para vender)</label><input type="number" id="rev-cantreal" placeholder="0"></div>
     </div>
     <div class="hint" id="rev-preview"></div>
     <div class="row-actions"><button class="btn secondary" id="rev-guardar">Guardar revisión</button></div>
@@ -496,33 +601,27 @@ function renderCompras(main){
   main.appendChild(resumenCard);
 
   main.appendChild(el(`<div class="card"><h3>Compras registradas</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">V. unitario</th><th class="num">V. total</th><th class="num">Descuento</th><th class="num">Cant. real</th><th class="num">Costo real unit.</th></tr></thead>
-    <tbody>${STATE.compras.slice().reverse().map(c=>`<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitario)}</td><td class="num">${fmtMoney(c.ValorTotal)}</td><td class="num">${fmtMoney(c.Descuento)}</td><td class="num">${fmtNum(c.CantidadReal)}${Number(c.CantidadReal) < Number(c.Cantidad) ? ' <span class="mono" style="color:var(--tomate);font-size:11px;">(merma)</span>' : ''}</td><td class="num">${fmtMoney(c.ValorUnitarioReal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="9">Sin compras aún.</td></tr>'}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Proveedor</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">V. unitario</th><th class="num">V. total</th><th class="num">Descuento</th><th class="num">Cant. efectiva</th><th class="num">Costo real unit.</th></tr></thead>
+    <tbody>${detallesPlanos.slice().reverse().map(c=>`<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Hora||''}</td><td>${c.Proveedor||'—'}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitario)}</td><td class="num">${fmtMoney(c.ValorTotal)}</td><td class="num">${fmtMoney(c.Descuento)}</td><td class="num">${fmtNum(c.CantidadEfectiva)}${Number(c.CantidadEfectiva) < Number(c.Cantidad) ? ' <span class="mono" style="color:var(--tomate);font-size:11px;">(merma)</span>' : ''}</td><td class="num">${fmtMoney(c.ValorUnitarioReal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="11">Sin compras aún.</td></tr>'}</tbody></table></div>
   </div>`));
 
-  const preview = () => {
-    const cant = Number(document.getElementById('com-cantidad').value)||0;
-    const vu = Number(document.getElementById('com-valorunit').value)||0;
-    const desc = Number(document.getElementById('com-descuento').value)||0;
-    document.getElementById('com-total-preview').textContent = 'Valor total: ' + fmtMoney((cant*vu)-desc);
-  };
-  document.getElementById('com-cantidad').oninput = preview;
-  document.getElementById('com-valorunit').oninput = preview;
-  document.getElementById('com-descuento').oninput = preview;
-  wireArticuloOtro('com-articulo');
-
   document.getElementById('com-guardar').onclick = async () => {
+    const items = compraLineIds.map(n => ({
+      articulo: getArticuloValue('com-art-'+n),
+      unidad: document.getElementById('com-uni-'+n).value,
+      cantidad: document.getElementById('com-cant-'+n).value,
+      valorUnitario: document.getElementById('com-vu-'+n).value,
+      descuento: document.getElementById('com-desc-'+n).value || 0
+    })).filter(it => it.articulo && it.cantidad && it.valorUnitario);
+    if(items.length === 0) return showToast('Agrega al menos un artículo con cantidad y valor unitario', true);
     const data = {
       fecha: document.getElementById('com-fecha').value,
-      articulo: getArticuloValue('com-articulo'),
-      unidad: document.getElementById('com-unidad').value,
-      cantidad: document.getElementById('com-cantidad').value,
-      valorUnitario: document.getElementById('com-valorunit').value,
-      descuento: document.getElementById('com-descuento').value || 0
+      hora: horaActual(),
+      proveedor: document.getElementById('com-proveedor').value,
+      items: items
     };
-    if(!data.articulo || !data.cantidad || !data.valorUnitario) return showToast('Completa artículo, cantidad y valor unitario', true);
-    const r = await apiPost('addCompra', data);
-    if(r.ok){ STATE.compras.push(r.item); showToast('Compra guardada'); renderSection(); }
+    const r = await apiPost('addCompraCabecera', data);
+    if(r.ok){ showToast('Compra guardada'); await loadAll(); goTo('compras'); }
     else showToast(r.error, true);
   };
 
@@ -538,68 +637,65 @@ function renderCompras(main){
       egreso: valor
     };
     const r = await apiPost('addCaja', data);
-    if(r.ok){ STATE.caja.push(r.item); showToast('Gasto del día guardado'); renderSection(); }
+    if(r.ok){ showToast('Gasto del día guardado'); await loadAll(); goTo('compras'); }
     else showToast(r.error, true);
   };
 
-  // ---- Revisión en casa: cantidad real y descuento ----
+  // ---- Revisión en casa: cantidad efectiva y descuento ----
   const revFecha = document.getElementById('rev-fecha');
   const revCompraSel = document.getElementById('rev-compra');
   const revDescuento = document.getElementById('rev-descuento');
   const revCantReal = document.getElementById('rev-cantreal');
   const revPreview = document.getElementById('rev-preview');
 
-  function poblarComprasDelDia(){
+  function poblarArticulosDelDia(){
     const fecha = revFecha.value;
-    const compras = STATE.compras.filter(c => c.Fecha === fecha);
-    revCompraSel.innerHTML = '<option value="">Selecciona una compra…</option>' +
-      compras.map(c => `<option value="${c.ID}">${c.Articulo} · ${fmtNum(c.Cantidad)} ${c.Unidad} · ${fmtMoney(c.ValorTotal)}</option>`).join('');
+    const detalles = comprasFlat().filter(c => c.Fecha === fecha);
+    revCompraSel.innerHTML = '<option value="">Selecciona un artículo…</option>' +
+      detalles.map(c => `<option value="${c.ID}">${c.Proveedor?c.Proveedor+' · ':''}${c.Articulo} · ${fmtNum(c.Cantidad)} ${c.Unidad} · ${fmtMoney(c.ValorTotal)}</option>`).join('');
     revDescuento.value = '';
     revCantReal.value = '';
-    revPreview.textContent = compras.length ? '' : 'No hay compras registradas en esa fecha todavía.';
+    revPreview.textContent = detalles.length ? '' : 'No hay compras registradas en esa fecha todavía.';
   }
-  revFecha.addEventListener('change', poblarComprasDelDia);
-  poblarComprasDelDia();
+  revFecha.addEventListener('change', poblarArticulosDelDia);
+  poblarArticulosDelDia();
 
   revCompraSel.addEventListener('change', () => {
-    const compra = STATE.compras.find(c => c.ID === revCompraSel.value);
-    if(compra){
-      revDescuento.value = compra.Descuento || 0;
-      revCantReal.value = compra.CantidadReal || compra.Cantidad;
+    const det = comprasFlat().find(c => c.ID === revCompraSel.value);
+    if(det){
+      revDescuento.value = det.Descuento || 0;
+      revCantReal.value = det.CantidadEfectiva || det.Cantidad;
       actualizarRevPreview();
     }
   });
 
   function actualizarRevPreview(){
-    const compra = STATE.compras.find(c => c.ID === revCompraSel.value);
-    if(!compra) return;
-    const valorTotal = (Number(compra.Cantidad) * Number(compra.ValorUnitario)) - (Number(revDescuento.value)||0);
-    const cantReal = Number(revCantReal.value) || Number(compra.Cantidad);
+    const det = comprasFlat().find(c => c.ID === revCompraSel.value);
+    if(!det) return;
+    const valorTotal = (Number(det.Cantidad) * Number(det.ValorUnitario)) - (Number(revDescuento.value)||0);
+    const cantReal = Number(revCantReal.value) || Number(det.Cantidad);
     const vuReal = cantReal>0 ? valorTotal/cantReal : 0;
-    revPreview.textContent = `Nuevo valor total: ${fmtMoney(valorTotal)} · Costo real por ${compra.Unidad.toLowerCase()}: ${fmtMoney(vuReal)}`;
+    revPreview.textContent = `Nuevo valor total: ${fmtMoney(valorTotal)} · Costo real por ${det.Unidad.toLowerCase()}: ${fmtMoney(vuReal)}`;
   }
   revDescuento.addEventListener('input', actualizarRevPreview);
   revCantReal.addEventListener('input', actualizarRevPreview);
 
   document.getElementById('rev-guardar').onclick = async () => {
-    const compra = STATE.compras.find(c => c.ID === revCompraSel.value);
-    if(!compra) return showToast('Selecciona la compra a revisar', true);
+    const det = comprasFlat().find(c => c.ID === revCompraSel.value);
+    if(!det) return showToast('Selecciona el artículo a revisar', true);
     const data = {
-      id: compra.ID,
+      id: det.ID,
       descuento: revDescuento.value,
-      cantidadReal: revCantReal.value
+      cantidadEfectiva: revCantReal.value
     };
-    const r = await apiPost('updateCompra', data);
-    if(r.ok){
-      Object.assign(compra, r.item);
-      showToast('Revisión guardada');
-      renderSection();
-    } else showToast(r.error, true);
+    const r = await apiPost('updateCompraDetalle', data);
+    if(r.ok){ showToast('Revisión guardada'); await loadAll(); goTo('compras'); }
+    else showToast(r.error, true);
   };
 
   function renderResumenDia(){
     const fecha = document.getElementById('res-fecha').value;
-    const totalCompras = STATE.compras.filter(c=>c.Fecha===fecha).reduce((s,c)=> s + Number(c.ValorTotal||0), 0);
+    const totalCompras = STATE.comprasCab.filter(c=>c.Fecha===fecha).reduce((s,c)=> s + Number(c.ValorTotal||0), 0);
     const totalProdServ = STATE.caja.filter(c=>c.Fecha===fecha).reduce((s,c)=> s + Number(c.Egreso||0), 0);
     const totalGeneral = totalCompras + totalProdServ;
     document.getElementById('res-contenido').innerHTML = `
@@ -611,148 +707,6 @@ function renderCompras(main){
   }
   document.getElementById('res-fecha').onchange = renderResumenDia;
   renderResumenDia();
-}
-
-/* ======================= VENTAS ======================= */
-function renderVentas(main){
-  main.appendChild(el(pageHead('Venta ambulante','Ventas','El administrador fija el precio de venta de cada artículo una vez al día; ese precio aplica a todas las ventas de ese artículo en la jornada. Si rematas al final del día, activa "precio cerrado" para esa venta puntual.')));
-
-  const precioCard = el(`<div class="card"><h3>Precio del día por artículo</h3>
-    <div class="grid">
-      <div class="field"><label>Fecha</label><input type="date" id="pre-fecha" value="${todayStr()}"></div>
-      <div class="field"><label>Artículo</label>${selectArticuloHTML('pre-articulo')}</div>
-      <div class="field"><label>Precio unitario del día</label><input type="number" id="pre-precio" placeholder="0"></div>
-    </div>
-    <div class="row-actions"><button class="btn secondary" id="pre-guardar">Fijar / actualizar precio</button></div>
-    <div class="hint">Este precio se autocompletará al registrar ventas de ese artículo en esta fecha. Puede actualizarse en cualquier momento del día.</div>
-    <div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Precio unitario</th></tr></thead>
-    <tbody>${STATE.preciosDia.slice().reverse().slice(0,8).map(p=>`<tr><td>${p.Fecha}</td><td>${p.Articulo}</td><td class="num">${fmtMoney(p.PrecioUnitario)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="3">Aún no se ha fijado ningún precio.</td></tr>'}</tbody></table></div>
-  </div>`);
-  main.appendChild(precioCard);
-
-  const card = el(`<div class="card"><h3>Nueva venta</h3>
-    <div class="grid">
-      <div class="field"><label>Fecha</label><input type="date" id="ven-fecha" value="${todayStr()}"></div>
-      <div class="field"><label>Artículo</label>${selectArticuloHTML('ven-articulo')}</div>
-      <div class="field"><label>Unidad de medida</label><select id="ven-unidad">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
-      <div class="field"><label>Cantidad</label><input type="number" id="ven-cantidad" placeholder="0"></div>
-      <div class="field"><label>Valor unitario (precio del día)</label><input type="number" id="ven-valorunit" placeholder="0"></div>
-      <div class="field"><label>Tipo de pago</label><select id="ven-tipopago"><option value="Contado">Contado</option><option value="Fiado">Fiado (crédito)</option></select></div>
-    </div>
-    <div class="hint" id="ven-precio-hint"></div>
-    <div class="checkbox-row"><input type="checkbox" id="ven-cerrado"><label for="ven-cerrado">Precio cerrado / remate (venta a un valor total distinto al calculado)</label></div>
-    <div class="grid" id="ven-cerrado-fields" style="display:none; margin-top:10px;">
-      <div class="field"><label>Valor total acordado</label><input type="number" id="ven-totalcerrado" placeholder="0"></div>
-    </div>
-    <div class="field" id="ven-cliente-field" style="margin-top:10px;">
-      <label>Cliente (obligatorio si es fiado; opcional en venta de contado)</label>
-      <select id="ven-cliente"><option value="">Selecciona cliente…</option>${STATE.clientes.map(c=>`<option value="${c.ID}">${c.Nombre}</option>`).join('')}</select>
-    </div>
-    <div class="hint" id="ven-preview">Valor total: $ 0</div>
-    <div class="row-actions"><button class="btn" id="ven-guardar">Guardar venta</button></div>
-  </div>`);
-  main.appendChild(card);
-
-  main.appendChild(el(`<div class="card"><h3>Ventas registradas</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">V. unit. real</th><th class="num">V. total</th><th>Pago</th><th>Cliente</th></tr></thead>
-    <tbody>${STATE.ventas.slice().reverse().map(v=>{
-      const cli = STATE.clientes.find(c=>c.ID===v.IDCliente);
-      return `<tr><td>${fmtDate(v.Fecha)}</td><td>${v.Articulo}</td><td class="num">${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorUnitarioReal)}${v.EsPrecioCerrado?' <span class="mono" style="color:var(--tomate);font-size:11px;">(remate)</span>':''}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td><td>${cli?cli.Nombre:'—'}</td></tr>`;
-    }).join('') || '<tr class="empty-row"><td colspan="8">Sin ventas aún.</td></tr>'}</tbody></table></div>
-  </div>`));
-
-  const cerradoCheckbox = document.getElementById('ven-cerrado');
-  const cerradoFields = document.getElementById('ven-cerrado-fields');
-  const valorUnitInput = document.getElementById('ven-valorunit');
-  const tipoPagoSel = document.getElementById('ven-tipopago');
-  const clienteField = document.getElementById('ven-cliente-field');
-  const fechaInput = document.getElementById('ven-fecha');
-  const precioHint = document.getElementById('ven-precio-hint');
-  wireArticuloOtro('ven-articulo');
-  wireArticuloOtro('pre-articulo');
-
-  function buscarPrecioDia(){
-    const fecha = fechaInput.value;
-    const articulo = getArticuloValue('ven-articulo').trim().toLowerCase();
-    if(!fecha || !articulo) return null;
-    return STATE.preciosDia.find(p => p.Fecha === fecha && String(p.Articulo).trim().toLowerCase() === articulo) || null;
-  }
-  function autocompletarPrecio(){
-    const precio = buscarPrecioDia();
-    const articuloVal = getArticuloValue('ven-articulo');
-    if(precio){
-      valorUnitInput.value = precio.PrecioUnitario;
-      precioHint.textContent = `Precio del día fijado para "${precio.Articulo}": ${fmtMoney(precio.PrecioUnitario)}`;
-    } else {
-      precioHint.textContent = articuloVal ? 'Aún no hay precio fijado para este artículo hoy — escríbelo aquí para esta venta, o fíjalo arriba.' : '';
-    }
-    updatePreview();
-  }
-  fechaInput.addEventListener('change', autocompletarPrecio);
-  document.getElementById('ven-articulo').addEventListener('change', autocompletarPrecio);
-  document.getElementById('ven-articulo-otro').addEventListener('blur', autocompletarPrecio);
-
-  cerradoCheckbox.onchange = () => {
-    cerradoFields.style.display = cerradoCheckbox.checked ? 'grid' : 'none';
-    valorUnitInput.disabled = cerradoCheckbox.checked;
-    updatePreview();
-  };
-  tipoPagoSel.onchange = () => {};
-
-  function updatePreview(){
-    const cant = Number(document.getElementById('ven-cantidad').value)||0;
-    if(cerradoCheckbox.checked){
-      const total = Number(document.getElementById('ven-totalcerrado').value)||0;
-      const vuReal = cant>0 ? total/cant : 0;
-      document.getElementById('ven-preview').textContent = `Valor total: ${fmtMoney(total)}  →  discriminado: ${fmtMoney(vuReal)} por unidad`;
-    } else {
-      const vu = Number(valorUnitInput.value)||0;
-      document.getElementById('ven-preview').textContent = 'Valor total: ' + fmtMoney(cant*vu);
-    }
-  }
-  document.getElementById('ven-cantidad').oninput = updatePreview;
-  valorUnitInput.oninput = updatePreview;
-  document.getElementById('ven-totalcerrado').oninput = updatePreview;
-
-  document.getElementById('ven-guardar').onclick = async () => {
-    const esCerrado = cerradoCheckbox.checked;
-    const tipoPago = tipoPagoSel.value;
-    const idCliente = document.getElementById('ven-cliente').value;
-    if(tipoPago==='Fiado' && !idCliente) return showToast('Selecciona el cliente para la venta a crédito', true);
-
-    const data = {
-      fecha: document.getElementById('ven-fecha').value,
-      articulo: getArticuloValue('ven-articulo'),
-      unidad: document.getElementById('ven-unidad').value,
-      cantidad: document.getElementById('ven-cantidad').value,
-      valorUnitarioCalculado: document.getElementById('ven-valorunit').value || 0,
-      esPrecioCerrado: esCerrado,
-      valorTotalCerrado: document.getElementById('ven-totalcerrado').value || 0,
-      tipoPago: tipoPago,
-      idCliente: idCliente
-    };
-    if(!data.articulo || !data.cantidad) return showToast('Completa artículo y cantidad', true);
-    const r = await apiPost('addVenta', data);
-    if(r.ok){ STATE.ventas.push(r.item); showToast('Venta guardada'); await loadAll(); goTo('ventas'); }
-    else showToast(r.error, true);
-  };
-
-  document.getElementById('pre-guardar').onclick = async () => {
-    const data = {
-      fecha: document.getElementById('pre-fecha').value,
-      articulo: getArticuloValue('pre-articulo'),
-      precioUnitario: document.getElementById('pre-precio').value
-    };
-    if(!data.articulo || !data.precioUnitario) return showToast('Completa artículo y precio', true);
-    const r = await apiPost('setPrecioDia', data);
-    if(r.ok){
-      const existente = STATE.preciosDia.find(p => p.Fecha === data.fecha && String(p.Articulo).trim().toLowerCase() === data.articulo.trim().toLowerCase());
-      if(existente){ existente.PrecioUnitario = Number(data.precioUnitario); }
-      else { STATE.preciosDia.push(r.item); }
-      showToast(r.updated ? 'Precio del día actualizado' : 'Precio del día fijado');
-      renderSection();
-    } else showToast(r.error, true);
-  };
 }
 
 /* ======================= CLIENTES ======================= */
@@ -775,13 +729,13 @@ function renderClientes(main){
 
   const listWrap = el(`<div class="client-list"></div>`);
   STATE.clientes.forEach(cli => {
-    const saldos = STATE.fiado.filter(f => f.IDCliente === cli.ID);
-    const saldoTotal = saldos.reduce((s,f)=> s + Number(f.Saldo||0), 0);
+    const ventas = STATE.ventasCab.filter(v => v.IDCliente === cli.ID);
+    const saldoTotal = ventas.reduce((s,v)=> s + Number(v.Saldo||0), 0);
     listWrap.appendChild(el(`
       <div class="client-item" onclick="verCliente('${cli.ID}')">
         <div>
           <div class="name">${cli.Nombre}</div>
-          <div class="meta">${cli.Telefono || 'Sin teléfono'} · ${saldos.length} compra(s) fiada(s)</div>
+          <div class="meta">${cli.Telefono || 'Sin teléfono'} · ${ventas.length} compra(s) registrada(s)</div>
         </div>
         <div class="saldo ${saldoTotal<=0?'cero':'debe'}">${saldoTotal<=0 ? '<span class="badge pagado">AL DÍA</span>' : fmtMoney(saldoTotal)}</div>
       </div>
@@ -800,7 +754,7 @@ function renderClientes(main){
     };
     if(!data.nombre) return showToast('Ingresa el nombre del cliente', true);
     const r = await apiPost('addCliente', data);
-    if(r.ok){ STATE.clientes.push(r.item); showToast('Cliente registrado'); renderSection(); }
+    if(r.ok){ showToast('Cliente registrado'); await loadAll(); goTo('clientes'); }
     else showToast(r.error, true);
   };
 }
@@ -817,67 +771,253 @@ function renderClienteDetalle(main, id){
   main.appendChild(el(`<div class="back-link" onclick="goTo('clientes')">← Volver a clientes</div>`));
   main.appendChild(el(pageHead('Cliente', cli.Nombre, `${cli.Telefono||'Sin teléfono'} · ${cli.Direccion||'Sin dirección'}`)));
 
-  const todasCompras = STATE.ventas.filter(v => v.IDCliente === id).slice().reverse();
-  const totalGeneral = todasCompras.reduce((s,v)=> s + Number(v.ValorTotal||0), 0);
+  const ventasCliente = STATE.ventasCab.filter(v => v.IDCliente === id).slice().reverse();
+  const saldoTotal = ventasCliente.reduce((s,v)=> s + Number(v.Saldo||0), 0);
+  const totalHistorico = ventasCliente.reduce((s,v)=> s + Number(v.ValorTotal||0), 0);
 
   main.appendChild(el(`<div class="kpi-row">
-    <div class="kpi"><div class="label">Total histórico comprado</div><div class="value">${fmtMoney(totalGeneral)}</div></div>
-    <div class="kpi"><div class="label">Compras registradas</div><div class="value">${todasCompras.length}</div></div>
+    <div class="kpi"><div class="label">Total histórico comprado</div><div class="value">${fmtMoney(totalHistorico)}</div></div>
+    <div class="kpi"><div class="label">Compras registradas</div><div class="value">${ventasCliente.length}</div></div>
+    <div class="kpi ${saldoTotal>0?'tomate':''}"><div class="label">Deuda actual</div><div class="value">${fmtMoney(saldoTotal)}</div></div>
   </div>`));
 
-  main.appendChild(el(`<div class="card"><h3>Historial de compras (contado y fiado)</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">Valor</th><th>Pago</th></tr></thead>
-    <tbody>${todasCompras.map(v=>`<tr><td>${fmtDate(v.Fecha)}</td><td>${v.Articulo}</td><td class="num">${fmtNum(v.Cantidad)}</td><td>${v.Unidad}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td><span class="badge ${v.TipoPago==='Fiado'?'pendiente':'contado'}">${v.TipoPago||'Contado'}</span></td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Este cliente aún no tiene compras registradas.</td></tr>'}</tbody></table></div>
-  </div>`));
+  const detallesTodos = STATE.ventasDet;
+  ventasCliente.forEach(v => {
+    const items = detallesTodos.filter(d => d.IDVentaCabecera === v.ID);
+    const card = el(`<div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin-bottom:0;">${fmtDate(v.Fecha)} ${v.Hora?'· '+v.Hora:''}</h3>
+        <span class="badge ${v.Estado==='Pagado'?'pagado':'pendiente'}">${v.Estado}</span>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">Valor</th></tr></thead>
+      <tbody>${items.map(it=>`<tr><td>${it.Articulo}</td><td class="num">${fmtNum(it.Cantidad)}</td><td>${it.Unidad}</td><td class="num">${fmtMoney(it.ValorTotal)}</td></tr>`).join('')}</tbody></table></div>
+      <div class="kpi-row" style="margin-top:14px; margin-bottom:0;">
+        <div class="kpi"><div class="label">Total</div><div class="value">${fmtMoney(v.ValorTotal)}</div></div>
+        <div class="kpi"><div class="label">Abonado</div><div class="value">${fmtMoney(v.Abono)}</div></div>
+        <div class="kpi ${Number(v.Saldo)>0?'tomate':''}"><div class="label">Saldo</div><div class="value">${fmtMoney(v.Saldo)}</div></div>
+      </div>
+      ${Number(v.Saldo) > 0 ? `<div class="row-actions"><button class="btn small secondary" onclick="abrirAbono('${v.ID}', ${v.Saldo})">Abonar</button></div>` : ''}
+      <div id="abono-card-${v.ID}" style="display:none; margin-top:14px; padding-top:14px; border-top:1px solid var(--borde);">
+        <div class="grid">
+          <div class="field"><label>Fecha</label><input type="date" id="abono-fecha-${v.ID}" value="${todayStr()}"></div>
+          <div class="field"><label>Monto abonado (saldo actual: ${fmtMoney(v.Saldo)})</label><input type="number" id="abono-monto-${v.ID}" placeholder="0"></div>
+        </div>
+        <div class="row-actions"><button class="btn" onclick="guardarAbono('${v.ID}')">Guardar abono</button><button class="btn secondary" onclick="document.getElementById('abono-card-${v.ID}').style.display='none'">Cancelar</button></div>
+      </div>
+    </div>`);
+    main.appendChild(card);
+  });
+  if(ventasCliente.length===0) main.appendChild(el('<div class="hint">Este cliente aún no tiene compras registradas.</div>'));
 
-  const compras = STATE.fiado.filter(f => f.IDCliente === id).slice().reverse();
-  const saldoTotal = compras.reduce((s,f)=> s + Number(f.Saldo||0), 0);
-
-  main.appendChild(el(`<div class="kpi-row">
-    <div class="kpi tomate"><div class="label">Deuda actual (fiado)</div><div class="value">${fmtMoney(saldoTotal)}</div></div>
-    <div class="kpi"><div class="label">Compras fiadas</div><div class="value">${compras.length}</div></div>
-  </div>`));
-
-  const tableWrap = el(`<div class="card"><h3>Historial de compras a crédito</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Cant.</th><th>Unidad</th><th class="num">Valor</th><th class="num">Abonado</th><th class="num">Saldo</th><th>Estado</th><th></th></tr></thead>
-    <tbody>${compras.map(f=>`<tr>
-      <td>${fmtDate(f.Fecha)}</td><td>${f.Articulo}</td><td class="num">${fmtNum(f.Cantidad)}</td><td>${f.Unidad}</td>
-      <td class="num">${fmtMoney(f.ValorTotal)}</td><td class="num">${fmtMoney(f.Abonado)}</td><td class="num">${fmtMoney(f.Saldo)}</td>
-      <td><span class="badge ${f.Estado==='Pagado'?'pagado':'pendiente'}">${f.Estado}</span></td>
-      <td>${f.Estado!=='Pagado' ? `<button class="btn small secondary" onclick="abrirAbono('${f.ID}')">Abonar</button>` : ''}</td>
-    </tr>`).join('') || '<tr class="empty-row"><td colspan="9">Este cliente aún no tiene compras fiadas.</td></tr>'}</tbody></table></div>
-  </div>`);
-  main.appendChild(tableWrap);
-
-  const abonoCard = el(`<div class="card" id="abono-card" style="display:none;"><h3>Registrar abono</h3>
-    <div class="grid">
-      <div class="field"><label>Compra fiada</label><input type="text" id="abono-ref" disabled></div>
-      <div class="field"><label>Fecha</label><input type="date" id="abono-fecha" value="${todayStr()}"></div>
-      <div class="field"><label>Monto abonado</label><input type="number" id="abono-monto" placeholder="0"></div>
-    </div>
-    <div class="row-actions"><button class="btn" id="abono-guardar">Guardar abono</button><button class="btn secondary" onclick="document.getElementById('abono-card').style.display='none'">Cancelar</button></div>
-  </div>`);
-  main.appendChild(abonoCard);
-
-  window.abrirAbono = (fiadoId) => {
-    const f = compras.find(x => x.ID === fiadoId);
-    document.getElementById('abono-card').style.display = 'block';
-    document.getElementById('abono-ref').value = `${fmtDate(f.Fecha)} · ${f.Articulo} · saldo ${fmtMoney(f.Saldo)}`;
-    document.getElementById('abono-card').dataset.fiadoId = fiadoId;
-    document.getElementById('abono-card').scrollIntoView({behavior:'smooth'});
+  window.abrirAbono = (idVenta) => {
+    const cardEl = document.getElementById('abono-card-'+idVenta);
+    cardEl.style.display = 'block';
+    cardEl.scrollIntoView({behavior:'smooth'});
   };
-
-  document.getElementById('abono-guardar').onclick = async () => {
-    const fiadoId = document.getElementById('abono-card').dataset.fiadoId;
-    const monto = document.getElementById('abono-monto').value;
+  window.guardarAbono = async (idVenta) => {
+    const monto = document.getElementById('abono-monto-'+idVenta).value;
     if(!monto) return showToast('Ingresa el monto del abono', true);
     const data = {
-      idFiado: fiadoId,
-      fecha: document.getElementById('abono-fecha').value,
+      idVenta: idVenta,
+      fecha: document.getElementById('abono-fecha-'+idVenta).value,
       monto: monto
     };
     const r = await apiPost('addAbono', data);
     if(r.ok){ showToast('Abono registrado'); await loadAll(); currentClientId = id; renderSection(); }
+    else showToast(r.error, true);
+  };
+}
+
+/* ======================= VENTAS (carrito: varios artículos por venta, un cliente) ======================= */
+let ventaLineCounter = 0;
+let ventaLineIds = [];
+
+function ventaLineTemplate(n){
+  return `<div class="cart-line" data-line="${n}">
+    <button type="button" class="cart-line-remove" onclick="removeVentaLine(${n})" title="Quitar artículo">×</button>
+    <div class="grid">
+      <div class="field"><label>Artículo</label>${selectArticuloHTML('ven-art-'+n)}</div>
+      <div class="field"><label>Unidad</label><select id="ven-uni-${n}">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
+      <div class="field"><label>Cantidad</label><input type="number" id="ven-cant-${n}" placeholder="0"></div>
+      <div class="field"><label>Valor unitario (precio del día)</label><input type="number" id="ven-vu-${n}" placeholder="0"></div>
+    </div>
+    <div class="checkbox-row"><input type="checkbox" id="ven-cerrado-${n}"><label for="ven-cerrado-${n}">Precio cerrado / remate para este artículo</label></div>
+    <div class="field" id="ven-cerrado-field-${n}" style="display:none; margin-top:8px;"><label>Valor total acordado</label><input type="number" id="ven-totalcerrado-${n}" placeholder="0"></div>
+    <div class="hint mono" id="ven-sub-${n}">Subtotal: $ 0</div>
+  </div>`;
+}
+
+function addVentaLine(){
+  ventaLineCounter++;
+  const n = ventaLineCounter;
+  ventaLineIds.push(n);
+  const container = document.getElementById('ven-lineas');
+  container.appendChild(el(ventaLineTemplate(n)));
+  wireArticuloOtro('ven-art-'+n, () => autocompletarPrecioLinea(n));
+  document.getElementById('ven-art-'+n).addEventListener('change', () => autocompletarPrecioLinea(n));
+  ['ven-cant-'+n, 'ven-vu-'+n, 'ven-totalcerrado-'+n].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => updateVentaTotales());
+  });
+  document.getElementById('ven-cerrado-'+n).addEventListener('change', (e) => {
+    const campo = document.getElementById('ven-cerrado-field-'+n);
+    const vuInput = document.getElementById('ven-vu-'+n);
+    campo.style.display = e.target.checked ? 'block' : 'none';
+    vuInput.disabled = e.target.checked;
+    updateVentaTotales();
+  });
+  updateVentaTotales();
+}
+function removeVentaLine(n){
+  if(ventaLineIds.length <= 1) return showToast('Debe quedar al menos un artículo', true);
+  const el = document.querySelector(`#ven-lineas .cart-line[data-line="${n}"]`);
+  if(el) el.remove();
+  ventaLineIds = ventaLineIds.filter(x => x !== n);
+  updateVentaTotales();
+}
+function autocompletarPrecioLinea(n){
+  const fecha = document.getElementById('ven-fecha').value;
+  const articulo = getArticuloValue('ven-art-'+n).trim().toLowerCase();
+  if(!fecha || !articulo) return;
+  const precio = STATE.preciosDia.find(p => p.Fecha === fecha && String(p.Articulo).trim().toLowerCase() === articulo);
+  const cerrado = document.getElementById('ven-cerrado-'+n).checked;
+  if(precio && !cerrado){
+    document.getElementById('ven-vu-'+n).value = precio.PrecioUnitario;
+  }
+  updateVentaTotales();
+}
+function updateVentaTotales(){
+  let total = 0;
+  ventaLineIds.forEach(n => {
+    const cerrado = document.getElementById('ven-cerrado-'+n).checked;
+    let sub;
+    if(cerrado){
+      sub = Number(document.getElementById('ven-totalcerrado-'+n).value)||0;
+    } else {
+      const cant = Number(document.getElementById('ven-cant-'+n).value)||0;
+      const vu = Number(document.getElementById('ven-vu-'+n).value)||0;
+      sub = cant*vu;
+    }
+    total += sub;
+    const subEl = document.getElementById('ven-sub-'+n);
+    if(subEl) subEl.textContent = 'Subtotal: ' + fmtMoney(sub);
+  });
+  const totalEl = document.getElementById('ven-total-display');
+  if(totalEl) totalEl.textContent = fmtMoney(total);
+  actualizarDeudaPreview(total);
+}
+function actualizarDeudaPreview(total){
+  const deudaEl = document.getElementById('ven-deuda-display');
+  if(!deudaEl) return;
+  const abono = Number(document.getElementById('ven-abono').value)||0;
+  const deuda = total - abono;
+  deudaEl.innerHTML = deuda <= 0
+    ? '<span class="badge pagado">AL DÍA</span>'
+    : `<span class="mono" style="color:var(--tomate); font-weight:700;">${fmtMoney(deuda)} por cobrar</span>`;
+}
+
+function renderVentas(main){
+  ventaLineCounter = 0;
+  ventaLineIds = [];
+
+  main.appendChild(el(pageHead('Venta ambulante','Ventas','Elige el cliente (o deja "venta de contado" si no se registra), agrega todos los artículos que compró, y anota cuánto abona. La deuda se calcula sola.')));
+
+  const preciosHoy = STATE.preciosDia.filter(p => p.Fecha === todayStr());
+  const precioCard = el(`<div class="card"><h3>Precio del día por artículo</h3>
+    <div class="grid">
+      <div class="field"><label>Fecha</label><input type="date" id="pre-fecha" value="${todayStr()}"></div>
+      <div class="field"><label>Artículo</label>${selectArticuloHTML('pre-articulo')}</div>
+      <div class="field"><label>Precio unitario del día</label><input type="number" id="pre-precio" placeholder="0"></div>
+    </div>
+    <div class="row-actions"><button class="btn secondary" id="pre-guardar">Fijar / actualizar precio</button></div>
+    <div class="hint">Este precio se autocompletará al agregar ese artículo en una venta de esta fecha.</div>
+    <div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Precio unitario</th></tr></thead>
+    <tbody>${STATE.preciosDia.slice().reverse().slice(0,8).map(p=>`<tr><td>${fmtDate(p.Fecha)}</td><td>${p.Articulo}</td><td class="num">${fmtMoney(p.PrecioUnitario)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="3">Aún no se ha fijado ningún precio.</td></tr>'}</tbody></table></div>
+  </div>`);
+  main.appendChild(precioCard);
+
+  const clientesOptions = STATE.clientes.map(c=>`<option value="${c.ID}">${c.Nombre}</option>`).join('');
+  const card = el(`<div class="card"><h3>Nueva venta</h3>
+    <div class="grid" style="margin-bottom:14px;">
+      <div class="field"><label>Fecha</label><input type="date" id="ven-fecha" value="${todayStr()}"></div>
+      <div class="field" style="grid-column:span 2;"><label>Cliente</label>
+        <select id="ven-cliente">
+          <option value="">Venta de contado (sin registrar cliente)</option>
+          ${clientesOptions}
+        </select>
+      </div>
+    </div>
+    <div id="ven-lineas"></div>
+    <div class="row-actions" style="margin-bottom:6px;"><button class="btn secondary" type="button" onclick="addVentaLine()">+ Agregar artículo</button></div>
+    <div class="cart-total-bar"><span class="label">Total de la venta</span><span class="value" id="ven-total-display">$ 0</span></div>
+    <div class="grid" id="ven-pago-field" style="display:none;">
+      <div class="field"><label>Abono (lo que paga en este momento)</label><input type="number" id="ven-abono" placeholder="0 si no paga nada aún"></div>
+      <div class="field"><label>Deuda</label><div id="ven-deuda-display" style="padding-top:8px;"></div></div>
+    </div>
+    <div class="row-actions"><button class="btn" id="ven-guardar">Guardar venta</button></div>
+  </div>`);
+  main.appendChild(card);
+  addVentaLine();
+
+  const ventaFechaInput = document.getElementById('ven-fecha');
+  ventaFechaInput.addEventListener('change', () => ventaLineIds.forEach(n => autocompletarPrecioLinea(n)));
+
+  const clienteSel = document.getElementById('ven-cliente');
+  const pagoField = document.getElementById('ven-pago-field');
+  clienteSel.addEventListener('change', () => {
+    pagoField.style.display = clienteSel.value ? 'grid' : 'none';
+    updateVentaTotales();
+  });
+  document.getElementById('ven-abono').addEventListener('input', () => updateVentaTotales());
+
+  const ventasCabRows = STATE.ventasCab.slice().reverse();
+  main.appendChild(el(`<div class="card"><h3>Ventas registradas</h3>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Cliente</th><th>Artículos</th><th class="num">Total</th><th class="num">Abono</th><th class="num">Saldo</th><th>Estado</th></tr></thead>
+    <tbody>${ventasCabRows.map(v=>{
+      const cli = STATE.clientes.find(c=>c.ID===v.IDCliente);
+      const items = STATE.ventasDet.filter(d=>d.IDVentaCabecera===v.ID).map(d=>d.Articulo).join(', ');
+      return `<tr><td>${fmtDate(v.Fecha)}</td><td>${v.Hora||''}</td><td>${cli?cli.Nombre:'Contado'}</td><td>${items}</td><td class="num">${fmtMoney(v.ValorTotal)}</td><td class="num">${fmtMoney(v.Abono)}</td><td class="num">${fmtMoney(v.Saldo)}</td><td><span class="badge ${v.Estado==='Pagado'?'pagado':'pendiente'}">${v.Estado}</span></td></tr>`;
+    }).join('') || '<tr class="empty-row"><td colspan="8">Sin ventas aún.</td></tr>'}</tbody></table></div>
+  </div>`));
+
+  document.getElementById('pre-guardar').onclick = async () => {
+    const data = {
+      fecha: document.getElementById('pre-fecha').value,
+      articulo: getArticuloValue('pre-articulo'),
+      precioUnitario: document.getElementById('pre-precio').value
+    };
+    if(!data.articulo || !data.precioUnitario) return showToast('Completa artículo y precio', true);
+    const r = await apiPost('setPrecioDia', data);
+    if(r.ok){ showToast(r.updated ? 'Precio del día actualizado' : 'Precio del día fijado'); await loadAll(); goTo('ventas'); }
+    else showToast(r.error, true);
+  };
+
+  document.getElementById('ven-guardar').onclick = async () => {
+    const items = ventaLineIds.map(n => {
+      const cerrado = document.getElementById('ven-cerrado-'+n).checked;
+      return {
+        articulo: getArticuloValue('ven-art-'+n),
+        unidad: document.getElementById('ven-uni-'+n).value,
+        cantidad: document.getElementById('ven-cant-'+n).value,
+        valorUnitario: document.getElementById('ven-vu-'+n).value || 0,
+        esPrecioCerrado: cerrado,
+        valorTotalCerrado: cerrado ? (document.getElementById('ven-totalcerrado-'+n).value || 0) : 0
+      };
+    }).filter(it => it.articulo && it.cantidad && (Number(it.valorUnitario) || it.esPrecioCerrado));
+    if(items.length === 0) return showToast('Agrega al menos un artículo con cantidad y precio', true);
+
+    const idCliente = clienteSel.value;
+    const data = {
+      fecha: document.getElementById('ven-fecha').value,
+      hora: horaActual(),
+      idCliente: idCliente,
+      items: items
+    };
+    if(idCliente){
+      const abonoVal = document.getElementById('ven-abono').value;
+      data.abono = abonoVal === '' ? 0 : abonoVal;
+    }
+    const r = await apiPost('addVentaCabecera', data);
+    if(r.ok){ showToast('Venta guardada'); await loadAll(); goTo('ventas'); }
     else showToast(r.error, true);
   };
 }
@@ -887,7 +1027,7 @@ function renderHistCompras(main){
   main.appendChild(el(pageHead('Historial 1','Compras por artículo','Cantidad y dinero invertido por artículo, mes a mes.')));
 
   const porArticulo = {};
-  STATE.compras.forEach(c => {
+  comprasFlat().forEach(c => {
     const key = c.Articulo + '|' + monthKey(c.Fecha);
     if(!porArticulo[key]) porArticulo[key] = {articulo:c.Articulo, mes:monthKey(c.Fecha), cantidad:0, unidad:c.Unidad, total:0};
     porArticulo[key].cantidad += Number(c.Cantidad);
@@ -903,10 +1043,10 @@ function renderHistCompras(main){
 
 /* ======================= HISTORIAL: VENTA REAL / EFECTIVA ======================= */
 function renderHistVentaReal(main){
-  main.appendChild(el(pageHead('Historial 2','Venta real (con costo real de compra)','Producto realmente vendido por mes, y la merma detectada al descartar mercancía dañada al comprar.')));
+  main.appendChild(el(pageHead('Historial 2','Venta real (con costo real de compra)','Producto realmente vendido por mes, y la merma detectada al desgranar, empacar o descartar mercancía dañada.')));
 
   const porArticulo = {};
-  STATE.ventas.forEach(v => {
+  ventasFlat().forEach(v => {
     const key = v.Articulo + '|' + monthKey(v.Fecha);
     if(!porArticulo[key]) porArticulo[key] = {articulo:v.Articulo, mes:monthKey(v.Fecha), cantidad:0, unidad:v.Unidad, total:0};
     porArticulo[key].cantidad += Number(v.Cantidad);
@@ -919,10 +1059,10 @@ function renderHistVentaReal(main){
     <tbody>${rows.map(r=>`<tr><td class="mono">${r.mes}</td><td>${r.articulo}</td><td class="num">${fmtNum(r.cantidad)}</td><td>${r.unidad}</td><td class="num">${fmtMoney(r.cantidad>0?r.total/r.cantidad:0)}</td><td class="num">${fmtMoney(r.total)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="6">Sin datos aún.</td></tr>'}</tbody></table></div>
   </div>`));
 
-  const mermas = STATE.compras.filter(c => Number(c.CantidadReal) < Number(c.Cantidad));
+  const mermas = comprasFlat().filter(c => Number(c.CantidadEfectiva) < Number(c.Cantidad));
   main.appendChild(el(`<div class="card"><h3>Merma detectada al comprar (referencia)</h3>
-    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Comprado</th><th class="num">Real (tras descarte)</th><th class="num">Merma</th><th>Unidad</th><th class="num">Costo real unit.</th></tr></thead>
-    <tbody>${mermas.slice().reverse().map(c=>`<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td class="num">${fmtNum(c.CantidadReal)}</td><td class="num">${fmtNum(c.Cantidad-c.CantidadReal)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitarioReal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="7">Sin merma registrada aún.</td></tr>'}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Artículo</th><th class="num">Comprado</th><th class="num">Efectivo</th><th class="num">Merma</th><th>Unidad</th><th class="num">Costo real unit.</th></tr></thead>
+    <tbody>${mermas.slice().reverse().map(c=>`<tr><td>${fmtDate(c.Fecha)}</td><td>${c.Articulo}</td><td class="num">${fmtNum(c.Cantidad)}</td><td class="num">${fmtNum(c.CantidadEfectiva)}</td><td class="num">${fmtNum(c.Cantidad-c.CantidadEfectiva)}</td><td>${c.Unidad}</td><td class="num">${fmtMoney(c.ValorUnitarioReal)}</td></tr>`).join('') || '<tr class="empty-row"><td colspan="7">Sin merma registrada aún.</td></tr>'}</tbody></table></div>
   </div>`));
 }
 
@@ -943,7 +1083,7 @@ function renderHistVentaCliente(main){
     const verArticulos = document.getElementById('hist-ver-articulos').checked;
     const verTotal = document.getElementById('hist-ver-total').checked;
     tablesContainer.innerHTML = '';
-    const ventasConCliente = STATE.ventas.filter(v => v.IDCliente);
+    const ventasConCliente = STATE.ventasCab.filter(v => v.IDCliente);
 
     if(verTotal){
       const porCliente = {};
@@ -964,7 +1104,7 @@ function renderHistVentaCliente(main){
 
     if(verArticulos){
       const porClienteArt = {};
-      ventasConCliente.forEach(v => {
+      ventasFlat().filter(v => v.IDCliente).forEach(v => {
         const cli = STATE.clientes.find(c => c.ID === v.IDCliente);
         const nombre = cli ? cli.Nombre : 'Desconocido';
         const key = nombre + '|' + monthKey(v.Fecha) + '|' + v.Articulo;
@@ -1030,7 +1170,7 @@ function renderCaja(main){
       egreso: document.getElementById('caj-egreso').value || 0
     };
     const r = await apiPost('addCaja', data);
-    if(r.ok){ STATE.caja.push(r.item); showToast('Movimiento de caja guardado'); renderSection(); }
+    if(r.ok){ showToast('Movimiento de caja guardado'); await loadAll(); goTo('caja'); }
     else showToast(r.error, true);
   };
 }
