@@ -184,6 +184,74 @@
   }
   .cart-total-bar .label{font-size:12px; text-transform:uppercase; letter-spacing:0.04em; color:var(--tinta-suave); font-weight:600;}
   .cart-total-bar .value{font-family:'IBM Plex Mono',monospace; font-size:20px; font-weight:700; color:var(--verde-hoja);}
+
+  /* ---------- tabla de articulos (compras / ventas) ---------- */
+  /* Una fila por articulo, como en el cuaderno. En celular la fila se
+     reacomoda en tres lineas cortas; desde 900px es una tabla real con
+     encabezado unico. */
+  .cart-table{margin-bottom:6px;}
+  .cart-thead{display:none;}
+  .crow{
+    position:relative; background:var(--papel); border:1px solid var(--borde);
+    border-radius:8px; padding:10px 26px 10px 10px; margin-bottom:8px;
+    display:grid; grid-template-columns:1.25fr .8fr 1fr 1fr; gap:6px 6px;
+    grid-template-areas:
+      "art art art art"
+      "uni cant vu desc"
+      "sub sub sub sub";
+  }
+  .crow.venta{
+    grid-template-areas:
+      "art art art art"
+      "uni cant vu vu"
+      "cerr cerr sub sub";
+  }
+  .c-art{grid-area:art;} .c-uni{grid-area:uni;} .c-cant{grid-area:cant;}
+  .c-vu{grid-area:vu;} .c-desc{grid-area:desc;} .c-cerr{grid-area:cerr;} .c-sub{grid-area:sub;}
+  .crow .clabel{
+    display:block; font-size:10px; font-weight:600; text-transform:uppercase;
+    letter-spacing:0.04em; color:var(--tinta-suave); margin-bottom:3px;
+  }
+  .crow input, .crow select{padding:8px 6px; font-size:13.5px;}
+  /* Sin flechitas de incremento: en el celular se comen el ancho util */
+  .crow input[type=number]{-moz-appearance:textfield;}
+  .crow input[type=number]::-webkit-outer-spin-button,
+  .crow input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none; margin:0;}
+  .crow input[type=checkbox]{width:auto; margin:0;}
+  .crow .chk{
+    display:flex; align-items:center; gap:6px; margin:0; padding-top:14px;
+    font-size:11.5px; font-weight:600; text-transform:none; letter-spacing:0;
+    color:var(--tinta-suave); cursor:pointer;
+  }
+  .c-sub{text-align:right; align-self:center;}
+  .c-sub .subval{font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:700; color:var(--verde-hoja);}
+  .crow-del{
+    position:absolute; top:8px; right:8px; background:transparent; border:none;
+    color:var(--tomate); cursor:pointer; font-size:16px; font-weight:700; line-height:1; padding:2px 6px;
+  }
+  .crow-del:hover{background:rgba(193,68,14,0.1); border-radius:4px;}
+
+  @media (min-width:900px){
+    .cart-table.compras{--cols:2.2fr 1.1fr .8fr 1fr 1fr 1.1fr;}
+    .cart-table.ventas{--cols:2.2fr 1.1fr .8fr 1fr 1.2fr 1.1fr;}
+    .cart-thead{
+      display:grid; grid-template-columns:var(--cols); gap:10px;
+      padding:0 32px 6px 10px; border-bottom:1px solid var(--borde);
+      font-size:10.5px; font-weight:700; text-transform:uppercase;
+      letter-spacing:0.05em; color:var(--tinta-suave);
+    }
+    .cart-thead .num{text-align:right;}
+    .crow{
+      grid-template-columns:var(--cols); gap:10px;
+      grid-template-areas:"art uni cant vu desc sub";
+      background:transparent; border:none; border-bottom:1px solid var(--borde);
+      border-radius:0; padding:8px 32px 8px 10px; margin-bottom:0; align-items:center;
+    }
+    .crow.venta{grid-template-areas:"art uni cant vu cerr sub";}
+    .crow .clabel{display:none;}
+    .crow .chk{padding-top:0; justify-content:center;}
+    .crow-del{top:50%; right:4px; transform:translateY(-50%);}
+  }
 </style>
 </head>
 <body>
@@ -498,16 +566,14 @@ let compraLineCounter = 0;
 let compraLineIds = [];
 
 function compraLineTemplate(n){
-  return `<div class="cart-line" data-line="${n}">
-    <button type="button" class="cart-line-remove" onclick="removeCompraLine(${n})" title="Quitar artículo">×</button>
-    <div class="grid">
-      <div class="field"><label>Artículo</label>${selectArticuloHTML('com-art-'+n)}</div>
-      <div class="field"><label>Unidad</label><select id="com-uni-${n}">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
-      <div class="field"><label>Cantidad</label><input type="number" id="com-cant-${n}" placeholder="0"></div>
-      <div class="field"><label>Valor unitario</label><input type="number" id="com-vu-${n}" placeholder="0"></div>
-      <div class="field"><label>Descuento (sobre el total)</label><input type="number" id="com-desc-${n}" placeholder="0"></div>
-    </div>
-    <div class="hint mono" id="com-sub-${n}">Subtotal: $ 0</div>
+  return `<div class="crow" data-line="${n}">
+    <button type="button" class="crow-del" onclick="removeCompraLine(${n})" title="Quitar artículo">&times;</button>
+    <div class="c-art"><span class="clabel">Artículo</span>${selectArticuloHTML('com-art-'+n)}</div>
+    <div class="c-uni"><span class="clabel">Unidad</span><select id="com-uni-${n}">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
+    <div class="c-cant"><span class="clabel">Cant.</span><input type="number" inputmode="decimal" id="com-cant-${n}" placeholder="0"></div>
+    <div class="c-vu"><span class="clabel">V. unit.</span><input type="number" inputmode="numeric" id="com-vu-${n}" placeholder="0"></div>
+    <div class="c-desc"><span class="clabel">Desc.</span><input type="number" inputmode="numeric" id="com-desc-${n}" placeholder="0"></div>
+    <div class="c-sub"><span class="clabel">Subtotal</span><span class="subval" id="com-sub-${n}">$ 0</span></div>
   </div>`;
 }
 
@@ -519,27 +585,44 @@ function addCompraLine(){
   container.appendChild(el(compraLineTemplate(n)));
   wireArticuloOtro('com-art-'+n);
   ['com-cant-'+n, 'com-vu-'+n, 'com-desc-'+n].forEach(id => {
-    document.getElementById(id).addEventListener('input', () => updateCompraTotales());
+    document.getElementById(id).addEventListener('input', () => {
+      updateCompraTotales();
+      autoFilaCompra(n);
+    });
   });
   updateCompraTotales();
+  return n;
 }
+
+function autoFilaCompra(n){
+  // Como en el cuaderno: al escribir en la ultima fila aparece otra vacia
+  // debajo, para seguir anotando sin pensar en botones.
+  if(compraLineIds[compraLineIds.length - 1] !== n) return;
+  const cant = document.getElementById('com-cant-'+n).value;
+  const vu = document.getElementById('com-vu-'+n).value;
+  if(cant || vu) addCompraLine();
+}
+
 function removeCompraLine(n){
   if(compraLineIds.length <= 1) return showToast('Debe quedar al menos un artículo', true);
-  const el = document.querySelector(`.cart-line[data-line="${n}"]`);
-  if(el) el.remove();
+  const fila = document.querySelector(`#com-lineas .crow[data-line="${n}"]`);
+  if(fila) fila.remove();
   compraLineIds = compraLineIds.filter(x => x !== n);
   updateCompraTotales();
 }
+
 function updateCompraTotales(){
   let total = 0;
   compraLineIds.forEach(n => {
-    const cant = Number(document.getElementById('com-cant-'+n).value)||0;
+    const cantEl = document.getElementById('com-cant-'+n);
+    if(!cantEl) return;
+    const cant = Number(cantEl.value)||0;
     const vu = Number(document.getElementById('com-vu-'+n).value)||0;
     const desc = Number(document.getElementById('com-desc-'+n).value)||0;
     const sub = (cant*vu) - desc;
     total += sub;
     const subEl = document.getElementById('com-sub-'+n);
-    if(subEl) subEl.textContent = 'Subtotal: ' + fmtMoney(sub);
+    if(subEl) subEl.textContent = fmtMoney(sub);
   });
   const totalEl = document.getElementById('com-total-display');
   if(totalEl) totalEl.textContent = fmtMoney(total);
@@ -549,14 +632,17 @@ function renderCompras(main){
   compraLineCounter = 0;
   compraLineIds = [];
 
-  main.appendChild(el(pageHead('Abastos','Compras','Registra todos los artículos que compraste en un mismo proveedor/galpón como una sola compra. La revisión de cantidad efectiva se hace después, en casa, en la sección de abajo.')));
+  main.appendChild(el(pageHead('Abastos','Compras','Una fila por artículo, como en el cuaderno: al escribir en la última fila aparece otra vacía debajo. Todo lo comprado en el mismo proveedor/galpón se guarda de un solo clic. La revisión de cantidad efectiva se hace después, en casa, en la sección de abajo.')));
 
   const card = el(`<div class="card"><h3>Nueva compra</h3>
     <div class="grid" style="margin-bottom:14px;">
       <div class="field"><label>Fecha</label><input type="date" id="com-fecha" value="${todayStr()}"></div>
       <div class="field" style="grid-column:span 2;"><label>Proveedor (galpón / local en Cenabastos)</label><input type="text" id="com-proveedor" placeholder="Ej. Galpón El Paisa (opcional)"></div>
     </div>
-    <div id="com-lineas"></div>
+    <div class="cart-table compras">
+      <div class="cart-thead"><span>Art&iacute;culo</span><span>Unidad</span><span class="num">Cant.</span><span class="num">V. unit.</span><span class="num">Desc.</span><span class="num">Subtotal</span></div>
+      <div id="com-lineas"></div>
+    </div>
     <div class="row-actions" style="margin-bottom:6px;"><button class="btn secondary" type="button" onclick="addCompraLine()">+ Agregar artículo</button></div>
     <div class="cart-total-bar"><span class="label">Total de la compra</span><span class="value" id="com-total-display">$ 0</span></div>
     <div class="row-actions"><button class="btn" id="com-guardar">Guardar compra</button></div>
@@ -833,17 +919,17 @@ let ventaLineCounter = 0;
 let ventaLineIds = [];
 
 function ventaLineTemplate(n){
-  return `<div class="cart-line" data-line="${n}">
-    <button type="button" class="cart-line-remove" onclick="removeVentaLine(${n})" title="Quitar artículo">×</button>
-    <div class="grid">
-      <div class="field"><label>Artículo</label>${selectArticuloHTML('ven-art-'+n)}</div>
-      <div class="field"><label>Unidad</label><select id="ven-uni-${n}">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
-      <div class="field"><label>Cantidad</label><input type="number" id="ven-cant-${n}" placeholder="0"></div>
-      <div class="field"><label>Valor unitario (precio del día)</label><input type="number" id="ven-vu-${n}" placeholder="0"></div>
+  return `<div class="crow venta" data-line="${n}">
+    <button type="button" class="crow-del" onclick="removeVentaLine(${n})" title="Quitar artículo">&times;</button>
+    <div class="c-art"><span class="clabel">Artículo</span>${selectArticuloHTML('ven-art-'+n)}</div>
+    <div class="c-uni"><span class="clabel">Unidad</span><select id="ven-uni-${n}">${UNIDADES.map(u=>`<option>${u}</option>`).join('')}</select></div>
+    <div class="c-cant"><span class="clabel">Cant.</span><input type="number" inputmode="decimal" id="ven-cant-${n}" placeholder="0"></div>
+    <div class="c-vu"><span class="clabel" id="ven-vu-label-${n}">V. unit.</span>
+      <input type="number" inputmode="numeric" id="ven-vu-${n}" placeholder="0">
+      <input type="number" inputmode="numeric" id="ven-totalcerrado-${n}" placeholder="0" style="display:none;">
     </div>
-    <div class="checkbox-row"><input type="checkbox" id="ven-cerrado-${n}"><label for="ven-cerrado-${n}">Precio cerrado / remate para este artículo</label></div>
-    <div class="field" id="ven-cerrado-field-${n}" style="display:none; margin-top:8px;"><label>Valor total acordado</label><input type="number" id="ven-totalcerrado-${n}" placeholder="0"></div>
-    <div class="hint mono" id="ven-sub-${n}">Subtotal: $ 0</div>
+    <div class="c-cerr"><label class="chk" for="ven-cerrado-${n}"><input type="checkbox" id="ven-cerrado-${n}"> Precio cerrado</label></div>
+    <div class="c-sub"><span class="clabel">Subtotal</span><span class="subval" id="ven-sub-${n}">$ 0</span></div>
   </div>`;
 }
 
@@ -856,26 +942,46 @@ function addVentaLine(){
   wireArticuloOtro('ven-art-'+n, () => autocompletarPrecioLinea(n));
   document.getElementById('ven-art-'+n).addEventListener('change', () => autocompletarPrecioLinea(n));
   ['ven-cant-'+n, 'ven-vu-'+n, 'ven-totalcerrado-'+n].forEach(id => {
-    document.getElementById(id).addEventListener('input', () => updateVentaTotales());
+    document.getElementById(id).addEventListener('input', () => {
+      updateVentaTotales();
+      autoFilaVenta(n);
+    });
   });
   document.getElementById('ven-cerrado-'+n).addEventListener('change', (e) => {
-    const campo = document.getElementById('ven-cerrado-field-'+n);
+    // El precio cerrado reemplaza el valor unitario en la misma casilla,
+    // para no ensanchar la fila.
     const vuInput = document.getElementById('ven-vu-'+n);
-    campo.style.display = e.target.checked ? 'block' : 'none';
-    vuInput.disabled = e.target.checked;
+    const totInput = document.getElementById('ven-totalcerrado-'+n);
+    const label = document.getElementById('ven-vu-label-'+n);
+    vuInput.style.display = e.target.checked ? 'none' : 'block';
+    totInput.style.display = e.target.checked ? 'block' : 'none';
+    label.textContent = e.target.checked ? 'Total' : 'V. unit.';
     updateVentaTotales();
   });
   updateVentaTotales();
+  return n;
 }
+
+function autoFilaVenta(n){
+  if(ventaLineIds[ventaLineIds.length - 1] !== n) return;
+  const cant = document.getElementById('ven-cant-'+n).value;
+  const vu = document.getElementById('ven-vu-'+n).value;
+  const tot = document.getElementById('ven-totalcerrado-'+n).value;
+  if(cant || vu || tot) addVentaLine();
+}
+
 function removeVentaLine(n){
   if(ventaLineIds.length <= 1) return showToast('Debe quedar al menos un artículo', true);
-  const el = document.querySelector(`#ven-lineas .cart-line[data-line="${n}"]`);
-  if(el) el.remove();
+  const fila = document.querySelector(`#ven-lineas .crow[data-line="${n}"]`);
+  if(fila) fila.remove();
   ventaLineIds = ventaLineIds.filter(x => x !== n);
   updateVentaTotales();
 }
+
 function autocompletarPrecioLinea(n){
-  const fecha = document.getElementById('ven-fecha').value;
+  const fechaEl = document.getElementById('ven-fecha');
+  if(!fechaEl) return;
+  const fecha = fechaEl.value;
   const articulo = getArticuloValue('ven-art-'+n).trim().toLowerCase();
   if(!fecha || !articulo) return;
   const precio = STATE.preciosDia.find(p => p.Fecha === fecha && String(p.Articulo).trim().toLowerCase() === articulo);
@@ -885,10 +991,13 @@ function autocompletarPrecioLinea(n){
   }
   updateVentaTotales();
 }
+
 function updateVentaTotales(){
   let total = 0;
   ventaLineIds.forEach(n => {
-    const cerrado = document.getElementById('ven-cerrado-'+n).checked;
+    const cerradoEl = document.getElementById('ven-cerrado-'+n);
+    if(!cerradoEl) return;
+    const cerrado = cerradoEl.checked;
     let sub;
     if(cerrado){
       sub = Number(document.getElementById('ven-totalcerrado-'+n).value)||0;
@@ -899,12 +1008,13 @@ function updateVentaTotales(){
     }
     total += sub;
     const subEl = document.getElementById('ven-sub-'+n);
-    if(subEl) subEl.textContent = 'Subtotal: ' + fmtMoney(sub);
+    if(subEl) subEl.textContent = fmtMoney(sub);
   });
   const totalEl = document.getElementById('ven-total-display');
   if(totalEl) totalEl.textContent = fmtMoney(total);
   actualizarDeudaPreview(total);
 }
+
 function actualizarDeudaPreview(total){
   const deudaEl = document.getElementById('ven-deuda-display');
   if(!deudaEl) return;
@@ -919,7 +1029,7 @@ function renderVentas(main){
   ventaLineCounter = 0;
   ventaLineIds = [];
 
-  main.appendChild(el(pageHead('Venta ambulante','Ventas','Elige el cliente (o deja "venta de contado" si no se registra), agrega todos los artículos que compró, y anota cuánto abona. La deuda se calcula sola.')));
+  main.appendChild(el(pageHead('Venta ambulante','Ventas','Elige el cliente (o deja "venta de contado" si no se registra) y anota los artículos en la tabla, una fila por artículo. Todo se guarda de un solo clic y la deuda se calcula sola.')));
 
   const preciosHoy = STATE.preciosDia.filter(p => p.Fecha === todayStr());
   const precioCard = el(`<div class="card"><h3>Precio del día por artículo</h3>
@@ -946,7 +1056,10 @@ function renderVentas(main){
         </select>
       </div>
     </div>
-    <div id="ven-lineas"></div>
+    <div class="cart-table ventas">
+      <div class="cart-thead"><span>Art&iacute;culo</span><span>Unidad</span><span class="num">Cant.</span><span class="num">V. unit.</span><span>Precio cerrado</span><span class="num">Subtotal</span></div>
+      <div id="ven-lineas"></div>
+    </div>
     <div class="row-actions" style="margin-bottom:6px;"><button class="btn secondary" type="button" onclick="addVentaLine()">+ Agregar artículo</button></div>
     <div class="cart-total-bar"><span class="label">Total de la venta</span><span class="value" id="ven-total-display">$ 0</span></div>
     <div class="grid" id="ven-pago-field" style="display:none;">
